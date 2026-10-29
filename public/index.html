@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>201Fitful</title>
+    <meta name="description" content="Deklarasi, aktivitas, dan kalori harian." />
+    <meta name="theme-color" content="#0f9d6e" />
+    <link rel="stylesheet" href="/styles.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='24' fill='%230f9d6e'/%3E%3Cpath d='M28 52l14 14 30-30' stroke='white' stroke-width='10' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <header class="topbar" id="topbar" hidden>
+      <div class="topbar-inner">
+        <a class="brand" href="#" aria-label="201Fitful">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+              <path d="M5 13l4 4L19 7" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </span>
+          <span class="brand-name">201<span>Fitful</span></span>
+        </a>
+        <div class="topbar-actions">
+          <button type="button" class="btn btn-icon" id="btn-edit-profile" aria-label="Edit profil" title="Edit profil">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path
+                d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4 12.5-12.5z"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+          <button type="button" class="btn btn-icon" id="btn-switch-user" aria-label="Ganti pengguna" title="Ganti pengguna">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" stroke-linecap="round" />
+              <path d="M16 17l5-5-5-5M21 12H9" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <!-- ============================ ONBOARDING ============================ -->
+      <section class="view onboarding" id="view-onboarding">
+        <div class="onboarding-wrap">
+          <div class="brand brand-lg">
+            <span class="brand-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+                <path d="M5 13l4 4L19 7" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </span>
+            <span class="brand-name">201<span>Fitful</span></span>
+          </div>
+
+          <form class="card form-card" id="form-profile" novalidate>
+            <h1>Data diri</h1>
+
+            <div class="field">
+              <label for="input-email">Email</label>
+              <input
+                id="input-email"
+                name="email"
+                type="email"
+                placeholder="nama@email.com"
+                autocomplete="email"
+                inputmode="email"
+                autocapitalize="none"
+                spellcheck="false"
+                required
+              />
+            </div>
+
+            <div class="field">
+              <label for="input-name">Nama</label>
+              <input id="input-name" name="name" type="text" placeholder="Nama kamu" autocomplete="name" required />
+            </div>
+
+            <div class="field-row">
+              <div class="field">
+                <label for="input-age">Usia</label>
+                <div class="input-suffix">
+                  <input id="input-age" name="age" type="number" min="5" max="110" placeholder="25" required />
+                  <span>th</span>
+                </div>
+              </div>
+              <div class="field">
+                <label>Gender</label>
+                <div class="segmented" role="radiogroup" aria-label="Gender">
+                  <label class="segmented-option">
+                    <input type="radio" name="gender" value="male" checked />
+                    <span>Pria</span>
+                  </label>
+                  <label class="segmented-option">
+                    <input type="radio" name="gender" value="female" />
+                    <span>Wanita</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="field-row">
+              <div class="field">
+                <label for="input-height">Tinggi</label>
+                <div class="input-suffix">
+                  <input id="input-height" name="heightCm" type="number" step="0.1" min="80" max="250" placeholder="170" required />
+                  <span>cm</span>
+                </div>
+              </div>
+              <div class="field">
+                <label for="input-weight">Berat</label>
+                <div class="input-suffix">
+                  <input id="input-weight" name="weightKg" type="number" step="0.1" min="20" max="300" placeholder="65" required />
+                  <span>kg</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="input-bodyfat">Body fat <span class="optional">(opsional)</span></label>
+              <div class="input-suffix">
+                <input id="input-bodyfat" name="bodyFat" type="number" step="0.1" min="2" max="70" placeholder="22" inputmode="decimal" />
+                <span>%</span>
+              </div>
+            </div>
+
+            <div class="bmi-preview" id="bmi-preview">
+              <span>BMI</span>
+              <strong id="bmi-value">—</strong>
+              <em id="bmi-category">—</em>
+            </div>
+
+            <p class="form-error" id="onboarding-error" hidden></p>
+
+            <button class="btn btn-primary btn-block" type="submit" id="btn-save-profile">Simpan &amp; mulai</button>
+          </form>
+        </div>
+      </section>
+
+      <!-- ============================= DASHBOARD ============================ -->
+      <section class="view dashboard" id="view-dashboard" hidden>
+        <div class="container">
+          <section class="hero">
+            <div class="hero-copy">
+              <span class="eyebrow" id="today-label">Hari ini</span>
+              <h1>Halo, <span id="hero-name">Sobat</span></h1>
+              <p id="hero-sub">Belum ada catatan.</p>
+              <div class="hero-meta">
+                <span class="meta-pill"><span class="dot dot-fire"></span><strong id="streak-value">0</strong> hari</span>
+                <span class="meta-pill"><span class="dot dot-leaf"></span><strong id="calories-value">0</strong> kkal</span>
+              </div>
+            </div>
+            <div class="progress-ring" id="progress-ring" style="--p: 0">
+              <div class="progress-ring-inner">
+                <strong id="progress-percent">0%</strong>
+                <span id="progress-count">0/7</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="card rec-card">
+            <h2>Anjuran harian</h2>
+            <div class="rec-item">
+              <div class="rec-line">
+                <span>Protein minimal</span>
+                <strong id="rec-protein-target">—</strong>
+              </div>
+              <div class="rec-bar"><span id="rec-protein-bar" style="width: 0%"></span></div>
+              <p class="rec-now" id="rec-protein-now">0 g</p>
+            </div>
+            <div class="rec-item">
+              <div class="rec-line">
+                <span>Kalori maksimal</span>
+                <strong id="rec-calorie-target">—</strong>
+              </div>
+              <div class="rec-bar is-calorie"><span id="rec-calorie-bar" style="width: 0%"></span></div>
+              <p class="rec-now" id="rec-calorie-now">0 kkal</p>
+            </div>
+          </section>
+
+          <div class="layout">
+            <div class="layout-main">
+              <section class="card daybar-card">
+                <div class="day-strip" id="day-strip"></div>
+              </section>
+
+              <form class="card day-form" id="form-day" novalidate>
+                <h2 class="section-title"><span aria-hidden="true">🎯</span> Deklarasi hari ini</h2>
+                <textarea
+                  id="input-declaration"
+                  maxlength="500"
+                  rows="2"
+                  placeholder="Hari ini saya berkomitmen untuk…"
+                  aria-label="Deklarasi hari ini"
+                ></textarea>
+
+                <h2 class="section-title"><span aria-hidden="true">🏃</span> Aktivitas hari ini</h2>
+                <div class="field-row">
+                  <div class="field">
+                    <label for="input-steps">Steps</label>
+                    <input id="input-steps" type="number" min="0" max="200000" placeholder="8000" inputmode="numeric" />
+                  </div>
+                  <div class="field">
+                    <label for="input-duration">Durasi</label>
+                    <div class="input-suffix">
+                      <input id="input-duration" type="number" min="0" max="1440" placeholder="45" inputmode="numeric" />
+                      <span>mnt</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="field">
+                  <label for="input-sport">Olahraga</label>
+                  <input id="input-sport" type="text" maxlength="120" placeholder="Jogging" autocomplete="off" />
+                </div>
+
+                <p class="form-error" id="day-error" hidden></p>
+
+                <div class="form-foot">
+                  <span class="form-note" id="day-note"></span>
+                  <button type="submit" class="btn btn-primary" id="btn-save-day">Simpan</button>
+                </div>
+              </form>
+
+              <section class="card meals-card">
+                <div class="card-head">
+                  <h2><span aria-hidden="true">🥗</span> Pola makan</h2>
+                  <span class="counter" id="meal-counter">0/3</span>
+                </div>
+                <div class="meals" id="meals"></div>
+                <div class="meal-totals">
+                  <div>
+                    <span>Kalori</span>
+                    <strong id="total-calories">0 kkal</strong>
+                  </div>
+                  <div>
+                    <span>Protein</span>
+                    <strong id="total-protein">0 g</strong>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <aside class="layout-side">
+              <section class="card profile-card">
+                <div class="profile-head">
+                  <div class="avatar" id="profile-avatar">F</div>
+                  <div class="profile-identity">
+                    <h2 id="profile-name">—</h2>
+                    <p id="profile-sub">—</p>
+                    <p class="profile-email" id="profile-email">—</p>
+                  </div>
+                </div>
+                <dl class="stat-grid">
+                  <div><dt>Usia</dt><dd id="stat-age">—</dd></div>
+                  <div><dt>Gender</dt><dd id="stat-gender">—</dd></div>
+                  <div><dt>Tinggi</dt><dd id="stat-height">—</dd></div>
+                  <div><dt>Berat</dt><dd id="stat-weight">—</dd></div>
+                  <div><dt>Body fat</dt><dd id="stat-bodyfat">—</dd></div>
+                </dl>
+                <div class="bmi-badge" id="bmi-badge">
+                  <span>BMI</span>
+                  <strong id="stat-bmi">—</strong>
+                  <em id="stat-bmi-category">—</em>
+                </div>
+              </section>
+
+              <section class="card history-card">
+                <div class="card-head">
+                  <h2>7 hari terakhir</h2>
+                </div>
+                <ul class="history-list" id="history-list"></ul>
+              </section>
+            </aside>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- ============================ EDIT MEAL MODAL ======================= -->
+    <div class="modal" id="modal-edit-meal" hidden>
+      <div class="modal-backdrop" data-close="modal-edit-meal"></div>
+      <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="edit-meal-title">
+        <button type="button" class="modal-close" data-close="modal-edit-meal" aria-label="Tutup">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 6l12 12M18 6L6 18" stroke-linecap="round" />
+          </svg>
+        </button>
+        <h2 id="edit-meal-title">Edit hasil AI</h2>
+        <p class="modal-sub" id="edit-meal-sub">Sarapan</p>
+
+        <div class="ai-original">
+          <span>Hasil AI</span>
+          <p id="ai-food">—</p>
+          <p class="ai-original-macros" id="ai-macros">—</p>
+        </div>
+
+        <form id="form-edit-meal" novalidate>
+          <div class="field">
+            <label for="edit-meal-food">Deskripsi</label>
+            <input id="edit-meal-food" type="text" maxlength="160" placeholder="Nasi putih, telur, tahu" required />
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="edit-meal-calories">Kalori</label>
+              <div class="input-suffix">
+                <input id="edit-meal-calories" type="number" min="0" max="5000" step="0.1" inputmode="decimal" required />
+                <span>kkal</span>
+              </div>
+            </div>
+            <div class="field">
+              <label for="edit-meal-protein">Protein</label>
+              <div class="input-suffix">
+                <input id="edit-meal-protein" type="number" min="0" max="500" step="0.1" inputmode="decimal" required />
+                <span>g</span>
+              </div>
+            </div>
+          </div>
+
+          <p class="form-error" id="edit-meal-error" hidden></p>
+
+          <button type="button" class="link-btn reset-link" id="btn-reset-meal" hidden>Kembalikan ke hasil AI</button>
+
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-close="modal-edit-meal">Batal</button>
+            <button type="submit" class="btn btn-primary" id="btn-save-meal">Simpan</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- ============================ PROFILE MODAL ========================= -->
+    <div class="modal" id="modal-profile" hidden>
+      <div class="modal-backdrop" data-close="modal-profile"></div>
+      <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="profile-modal-title">
+        <button type="button" class="modal-close" data-close="modal-profile" aria-label="Tutup">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 6l12 12M18 6L6 18" stroke-linecap="round" />
+          </svg>
+        </button>
+        <h2 id="profile-modal-title">Edit profil</h2>
+
+        <form id="form-edit-profile" novalidate>
+          <div class="field">
+            <label for="edit-email">Email</label>
+            <input id="edit-email" type="email" readonly />
+          </div>
+          <div class="field">
+            <label for="edit-name">Nama</label>
+            <input id="edit-name" type="text" maxlength="100" required />
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="edit-age">Usia</label>
+              <div class="input-suffix">
+                <input id="edit-age" type="number" min="5" max="110" required />
+                <span>th</span>
+              </div>
+            </div>
+            <div class="field">
+              <label>Gender</label>
+              <div class="segmented" role="radiogroup" aria-label="Gender">
+                <label class="segmented-option">
+                  <input type="radio" name="editGender" value="male" />
+                  <span>Pria</span>
+                </label>
+                <label class="segmented-option">
+                  <input type="radio" name="editGender" value="female" />
+                  <span>Wanita</span>
+                </label>
+              </div>
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="edit-height">Tinggi</label>
+              <div class="input-suffix">
+                <input id="edit-height" type="number" step="0.1" min="80" max="250" required />
+                <span>cm</span>
+              </div>
+            </div>
+            <div class="field">
+              <label for="edit-weight">Berat</label>
+              <div class="input-suffix">
+                <input id="edit-weight" type="number" step="0.1" min="20" max="300" required />
+                <span>kg</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="edit-bodyfat">Body fat <span class="optional">(opsional)</span></label>
+            <div class="input-suffix">
+              <input id="edit-bodyfat" type="number" step="0.1" min="2" max="70" inputmode="decimal" />
+              <span>%</span>
+            </div>
+          </div>
+
+          <p class="form-error" id="edit-error" hidden></p>
+
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-close="modal-profile">Batal</button>
+            <button type="submit" class="btn btn-primary" id="btn-save-edit">Simpan</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
