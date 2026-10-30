@@ -56,6 +56,54 @@ function todayString() {
   return new Date(now.getTime() - offset).toISOString().slice(0, 10);
 }
 
+/** Mengambil bagian tanggal (YYYY-MM-DD) dari nilai DATE MySQL. */
+function dateOnly(value) {
+  if (!value) return null;
+  if (typeof value === 'string') return value.slice(0, 10);
+  if (value instanceof Date) {
+    const offset = value.getTimezoneOffset() * 60000;
+    return new Date(value.getTime() - offset).toISOString().slice(0, 10);
+  }
+  return null;
+}
+
+/** Usia penuh dalam tahun, dihitung dari tanggal lahir. */
+function ageFromBirthDate(isoDate) {
+  const [year, month, day] = isoDate.split('-').map(Number);
+  const now = new Date();
+  let age = now.getFullYear() - year;
+  const beforeBirthday =
+    now.getMonth() + 1 < month || (now.getMonth() + 1 === month && now.getDate() < day);
+  if (beforeBirthday) age -= 1;
+  return age;
+}
+
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+function parseTime(value, label) {
+  if (value === undefined || value === null || value === '') return null;
+  const text = String(value).trim().slice(0, 5);
+  if (!TIME_RE.test(text)) throw new HttpError(400, `${label} harus berformat HH:MM.`);
+  return text;
+}
+
+function timeOnly(value) {
+  if (!value) return null;
+  return String(value).slice(0, 5);
+}
+
+/** Lama puasa dalam menit; melewati tengah malam dihitung ke hari berikutnya. */
+function fastingMinutes(lastMealTime, fastBreakTime) {
+  if (!lastMealTime || !fastBreakTime) return null;
+  const toMinutes = (time) => {
+    const [hours, minutes] = time.split(':').map(Number);
+    return hours * 60 + minutes;
+  };
+  let diff = toMinutes(fastBreakTime) - toMinutes(lastMealTime);
+  if (diff <= 0) diff += 24 * 60;
+  return diff;
+}
+
 function parseNumber(value, label, { min, max }) {
   const n = Number(value);
   if (!Number.isFinite(n)) throw new HttpError(400, `${label} harus berupa angka.`);
@@ -107,11 +155,14 @@ function recommendations({ weightKg, heightCm, age, gender }) {
 function shapeUser(row) {
   const heightCm = Number(row.height_cm);
   const weightKg = Number(row.weight_kg);
+  const birthDate = dateOnly(row.birth_date);
+  const age = birthDate ? ageFromBirthDate(birthDate) : Number(row.age);
   const profile = {
     id: row.id,
     name: row.name,
     email: row.email ?? null,
-    age: row.age,
+    birthDate,
+    age,
     gender: row.gender,
     heightCm,
     weightKg,
@@ -213,13 +264,24 @@ function parseProfile(body, { withEmail = false } = {}) {
   if (name.length < 2 || name.length > 100) {
     throw new HttpError(400, 'Nama harus 2-100 karakter.');
   }
-  const age = parseNumber(body.age, 'Usia', { min: 5, max: 110 });
-  if (!Number.isInteger(age)) throw new HttpError(400, 'Usia harus bilangan bulat.');
+
+  const birthDate = String(body.birthDate ?? '').trim().slice(0, 10);
+  if (!isValidDate(birthDate)) {
+    throw new HttpError(400, 'Tanggal lahir wajib diisi dengan format YYYY-MM-DD.');
+  }
+  if (birthDate > todayString()) {
+    throw new HttpError(400, 'Tanggal lahir tidak boleh tanggal yang akan datang.');
+  }
+  const age = ageFromBirthDate(birthDate);
+  if (age < 5 || age > 110) {
+    throw new HttpError(400, 'Usia dari tanggal lahir harus antara 5 dan 110 tahun.');
+  }
+
   if (!GENDERS.has(body.gender)) throw new HttpError(400, 'Gender harus "male" atau "female".');
   const heightCm = Math.round(parseNumber(body.heightCm, 'Tinggi badan', { min: 80, max: 250 }) * 10) / 10;
   const weightKg = Math.round(parseNumber(body.weightKg, 'Berat badan', { min: 20, max: 300 }) * 10) / 10;
   const bodyFat = optionalNumber(body.bodyFat, 'Body fat', { min: 2, max: 70 });
-  const profile = { name, age, gender: body.gender, heightCm, weightKg, bodyFat };
+  const profile = { name, birthDate, age, gender: body.gender, heightCm, weightKg, bodyFat };
   if (withEmail) profile.email = parseEmail(body.email);
   return profile;
 }
@@ -264,10 +326,11 @@ app.post('/api/users', async (req, res) => {
 
   try {
     const [result] = await pool.query(
-      'INSERT INTO users (name, email, age, gender, height_cm, weight_kg, body_fat) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO users (name, email, birth_date, age, gender, height_cm, weight_kg, body_fat) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       [
         profile.name,
         profile.email,
+        profile.birthDate,
         profile.age,
         profile.gender,
         profile.heightCm,
@@ -295,10 +358,11 @@ app.patch('/api/users/:userId', async (req, res) => {
   const profile = parseProfile(req.body);
   await pool.query(
     `UPDATE users
-        SET name = ?, age = ?, gender = ?, height_cm = ?, weight_kg = ?, body_fat = ?
+        SET name = ?, birth_date = ?, age = ?, gender = ?, height_cm = ?, weight_kg = ?, body_fat = ?
       WHERE id = ?`,
     [
       profile.name,
+      profile.birthDate,
       profile.age,
       profile.gender,
       profile.heightCm,
@@ -314,6 +378,8 @@ app.patch('/api/users/:userId', async (req, res) => {
 /* ------------------------------------------------------------------- days */
 
 function entryShape(row) {
+  const lastMealTime = timeOnly(row?.last_meal_time);
+  const fastBreakTime = timeOnly(row?.fast_break_time);
   return {
     declaration: row?.declaration_text ?? '',
     steps: row?.steps === null || row?.steps === undefined ? null : Number(row.steps),
@@ -322,6 +388,9 @@ function entryShape(row) {
       row?.duration_minutes === null || row?.duration_minutes === undefined
         ? null
         : Number(row.duration_minutes),
+    lastMealTime,
+    fastBreakTime,
+    fastingMinutes: fastingMinutes(lastMealTime, fastBreakTime),
   };
 }
 
@@ -387,16 +456,20 @@ app.put('/api/users/:userId/days/:date/entry', async (req, res) => {
   const steps = optionalInt(req.body.steps, 'Steps', 200000);
   const sport = optionalText(req.body.sport, 120);
   const durationMinutes = optionalInt(req.body.durationMinutes, 'Durasi', 1440);
+  const lastMealTime = parseTime(req.body.lastMealTime, 'Waktu makan terakhir');
+  const fastBreakTime = parseTime(req.body.fastBreakTime, 'Waktu buka puasa');
 
   await pool.query(
-    `INSERT INTO daily_entries (user_id, entry_date, declaration_text, steps, sport, duration_minutes)
-     VALUES (?, ?, ?, ?, ?, ?)
+    `INSERT INTO daily_entries (user_id, entry_date, declaration_text, steps, sport, duration_minutes, last_meal_time, fast_break_time)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
        declaration_text = VALUES(declaration_text),
        steps = VALUES(steps),
        sport = VALUES(sport),
-       duration_minutes = VALUES(duration_minutes)`,
-    [user.id, date, declaration, steps, sport, durationMinutes],
+       duration_minutes = VALUES(duration_minutes),
+       last_meal_time = VALUES(last_meal_time),
+       fast_break_time = VALUES(fast_break_time)`,
+    [user.id, date, declaration, steps, sport, durationMinutes, lastMealTime, fastBreakTime],
   );
 
   const day = await buildDay(user.id, date);
@@ -708,6 +781,12 @@ app.get('/api/dashboard', async (_req, res) => {
       sport: todayEntry?.sport ?? '',
       steps: todayEntry?.steps ?? null,
       durationMinutes: todayEntry?.duration_minutes ?? null,
+      lastMealTime: timeOnly(todayEntry?.last_meal_time),
+      fastBreakTime: timeOnly(todayEntry?.fast_break_time),
+      fastingMinutes: fastingMinutes(
+        timeOnly(todayEntry?.last_meal_time),
+        timeOnly(todayEntry?.fast_break_time),
+      ),
       proteinMet: daily.proteinG >= user.recommendation.proteinMinG && daily.proteinG > 0,
       calorieOver: daily.calories > user.recommendation.calorieMax,
       mealsComplete: todayMeals.length >= 3,
@@ -742,10 +821,103 @@ app.get('/api/dashboard', async (_req, res) => {
   res.json({ today, summary, users: result });
 });
 
+/* ------------------------------------------------------- dashboard detail */
+
+app.get('/api/dashboard/users/:userId', async (req, res) => {
+  const userRow = await findUser(req.params.userId);
+  const user = shapeUser(userRow);
+  const today = todayString();
+  const start = addDaysISO(today, -29);
+
+  const [entryRows] = await pool.query(
+    'SELECT * FROM daily_entries WHERE user_id = ? AND entry_date BETWEEN ? AND ?',
+    [user.id, start, today],
+  );
+  const [mealRows] = await pool.query(
+    'SELECT * FROM meals WHERE user_id = ? AND entry_date BETWEEN ? AND ? ORDER BY entry_date, id',
+    [user.id, start, today],
+  );
+
+  const entryMap = new Map();
+  for (const row of entryRows) entryMap.set(`${user.id}|${row.entry_date}`, row);
+
+  const mealMap = new Map();
+  for (const row of mealRows) {
+    const key = `${user.id}|${row.entry_date}`;
+    if (!mealMap.has(key)) mealMap.set(key, []);
+    mealMap.get(key).push(row);
+  }
+
+  const daily = summarizePeriod(user, entryMap, mealMap, today, 1);
+  const weekly = summarizePeriod(user, entryMap, mealMap, addDaysISO(today, -6), 7);
+  const monthly = summarizePeriod(user, entryMap, mealMap, start, 30);
+
+  const days = [];
+  let streak = 0;
+  for (let i = 29; i >= 0; i -= 1) {
+    const date = addDaysISO(today, -i);
+    const entry = entryMap.get(`${user.id}|${date}`);
+    const dayMeals = mealMap.get(`${user.id}|${date}`) ?? [];
+    const entryData = entryShape(entry);
+
+    const totals = {
+      calories: Math.round(
+        dayMeals.reduce((sum, meal) => sum + effectiveNutrition(meal).calories, 0),
+      ),
+      proteinG: round1(
+        dayMeals.reduce((sum, meal) => sum + effectiveNutrition(meal).proteinG, 0),
+      ),
+      meals: dayMeals.length,
+    };
+
+    const fields = [
+      entryData.declaration.trim().length > 0,
+      entryData.steps !== null,
+      entryData.sport.trim().length > 0,
+      entryData.durationMinutes !== null,
+    ].filter(Boolean).length;
+
+    days.push({
+      date,
+      today: date === today,
+      tracked: Boolean(entry) || dayMeals.length > 0,
+      entry: entryData,
+      meals: MEAL_TYPES.map((type) => dayMeals.find((m) => m.meal_type === type))
+        .filter(Boolean)
+        .map(shapeMeal),
+      totals,
+      progress: { done: fields + dayMeals.length, total: 7 },
+    });
+  }
+
+  for (let i = 0; i < 30; i += 1) {
+    const date = addDaysISO(today, -i);
+    const count = (mealMap.get(`${user.id}|${date}`) ?? []).length;
+    if (count === 0) {
+      if (streak === 0) continue;
+      break;
+    }
+    if (count >= 3) streak += 1;
+    else break;
+  }
+
+  res.json({
+    today,
+    user,
+    streak,
+    summary: { daily, weekly, monthly },
+    days,
+  });
+});
+
 /* ------------------------------------------------------------------ errors */
 
 app.get('/dashboard', (_req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, 'dashboard.html'));
+});
+
+app.get('/dashboard/:userId', (_req, res) => {
+  res.sendFile(path.join(PUBLIC_DIR, 'detail.html'));
 });
 
 app.use((req, res) => {
@@ -783,7 +955,7 @@ async function start() {
   }
 
   app.listen(PORT, () => {
-    console.log(`Fit Intake berjalan di http://localhost:${PORT}`);
+    console.log(`201Fitful berjalan di http://localhost:${PORT}`);
   });
 }
 

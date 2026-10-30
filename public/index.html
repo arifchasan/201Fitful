@@ -81,11 +81,8 @@
 
             <div class="field-row">
               <div class="field">
-                <label for="input-age">Usia</label>
-                <div class="input-suffix">
-                  <input id="input-age" name="age" type="number" min="5" max="110" placeholder="25" required />
-                  <span>th</span>
-                </div>
+                <label for="input-birthdate">Tanggal lahir</label>
+                <input id="input-birthdate" name="birthDate" type="date" required />
               </div>
               <div class="field">
                 <label>Gender</label>
@@ -216,6 +213,19 @@
                   <input id="input-sport" type="text" maxlength="120" placeholder="Jogging" autocomplete="off" />
                 </div>
 
+                <h2 class="section-title"><span aria-hidden="true">⏳</span> Puasa</h2>
+                <div class="field-row">
+                  <div class="field">
+                    <label for="input-lastmeal">Makan terakhir</label>
+                    <input id="input-lastmeal" type="time" inputmode="numeric" />
+                  </div>
+                  <div class="field">
+                    <label for="input-fastbreak">Buka puasa</label>
+                    <input id="input-fastbreak" type="time" inputmode="numeric" />
+                  </div>
+                </div>
+                <p class="fasting-note" id="fasting-note">Durasi puasa: —</p>
+
                 <p class="form-error" id="day-error" hidden></p>
 
                 <div class="form-foot">
@@ -254,7 +264,7 @@
                   </div>
                 </div>
                 <dl class="stat-grid">
-                  <div><dt>Usia</dt><dd id="stat-age">—</dd></div>
+                  <div><dt>Lahir</dt><dd id="stat-birth">—</dd></div>
                   <div><dt>Gender</dt><dd id="stat-gender">—</dd></div>
                   <div><dt>Tinggi</dt><dd id="stat-height">—</dd></div>
                   <div><dt>Berat</dt><dd id="stat-weight">—</dd></div>
@@ -353,11 +363,8 @@
           </div>
           <div class="field-row">
             <div class="field">
-              <label for="edit-age">Usia</label>
-              <div class="input-suffix">
-                <input id="edit-age" type="number" min="5" max="110" required />
-                <span>th</span>
-              </div>
+              <label for="edit-birthdate">Tanggal lahir</label>
+              <input id="edit-birthdate" type="date" required />
             </div>
             <div class="field">
               <label>Gender</label>

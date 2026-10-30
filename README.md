@@ -5,15 +5,17 @@ Jurnal kebugaran harian: tulis deklarasi, catat aktivitas, dan unggah foto makan
 ## Fitur
 
 - **Identifikasi email** — email unik menjadi identitas. Memasukkan email yang sudah terdaftar akan memuat profil dan seluruh data sebelumnya (tanpa membuat pengguna baru); data yang diketik ulang tidak menimpa profil lama.
-- **Onboarding profil** — email, nama, usia, gender, tinggi, berat, dan **body fat opsional**; BMI dihitung otomatis.
+- **Onboarding profil** — email, nama, **tanggal lahir (hari/bulan/tahun)**, gender, tinggi, berat, dan **body fat opsional**; usia dihitung otomatis dari tanggal lahir, BMI juga dihitung otomatis.
 - **Anjuran harian** — setelah masuk, dashboard menampilkan estimasi **protein minimal** (1,2 g × berat badan) dan **kalori maksimal** (Mifflin-St Jeor × faktor aktivitas ringan 1,375), lengkap dengan progres asupan hari itu.
 - **Deklarasi harian** — satu komitmen per hari.
 - **Aktivitas harian** — steps, jenis olahraga, dan durasi.
+- **Puasa harian** — waktu makan terakhir dan waktu buka puasa; durasi puasa dihitung otomatis (melewati tengah malam tetap dihitung benar).
 - **Pola makan** — slot Sarapan, Siang, Malam. Setiap slot menerima satu foto; foto langsung dikirim ke **OpenAI vision** untuk estimasi kalori, protein, dan deskripsi singkat makanan.
 - **Edit hasil AI** — deskripsi, kalori, dan protein bisa disunting. Hasil asli AI tetap disimpan: tiap kartu punya tombol **AI / Suntingan** untuk membandingkan, dan suntingan bisa dikembalikan ke hasil AI kapan saja.
 - **Total harian** — total kalori dan protein (memakai suntingan bila ada) dari ketiga foto, plus progres pengisian hari (7 bagian).
 - **Riwayat 7 hari & streak** — jumlah makan tercatat per hari dan hari beruntun dengan 3 foto lengkap.
-- **Dashboard semua pengguna** di `/dashboard` — ringkasan harian, mingguan, dan bulanan untuk setiap pengguna: kalori vs batas, protein vs target, makan tercatat, langkah, durasi olahraga, hari lengkap, dan status target tercapai/ tidak.
+- **Dashboard semua pengguna** di `/dashboard` — ringkasan harian, mingguan, dan bulanan untuk setiap pengguna: kalori vs batas, protein vs target, makan tercatat, langkah, durasi olahraga, puasa, hari lengkap, dan status target tercapai/ tidak.
+- **Detail per peserta** di `/dashboard/:userId` — profil lengkap, ringkasan hari ini/ 7 hari/ 30 hari, serta seluruh catatan harian 30 hari terakhir: deklarasi, aktivitas, jendela puasa, total gizi, dan **foto setiap makan** beserta hasil AI dan suntingannya.
 - Foto bisa diganti (foto lama dihapus), dihapus, dan analisis AI bisa diulang jika gagal.
 
 ## Stack
@@ -69,9 +71,9 @@ Jurnal kebugaran harian: tulis deklarasi, catat aktivitas, dan unggah foto makan
 
 ## Skema database
 
-**users** — profil pengguna (`id`, `name`, `email` unik, `age`, `gender`, `height_cm`, `weight_kg`, `body_fat` opsional, timestamps). Kolom email, index unik, dan body fat ditambahkan otomatis untuk database lama.
+**users** — profil pengguna (`id`, `name`, `email` unik, `birth_date`, `age`, `gender`, `height_cm`, `weight_kg`, `body_fat` opsional, timestamps). `birth_date` adalah sumber kebenaran usia; kolom `age` tetap diisi sebagai cache untuk pengguna lama yang belum punya tanggal lahir. Kolom email, index unik, body fat, dan birth date ditambahkan otomatis untuk database lama.
 
-**daily_entries** — satu baris per pengguna per tanggal (unik `user_id + entry_date`): `declaration_text`, `steps`, `sport`, `duration_minutes`.
+**daily_entries** — satu baris per pengguna per tanggal (unik `user_id + entry_date`): `declaration_text`, `steps`, `sport`, `duration_minutes`, `last_meal_time`, `fast_break_time`. Durasi puasa tidak disimpan; dihitung dari dua jam tersebut setiap kali data dibaca.
 
 **meals** — satu baris per pengguna, tanggal, dan jenis makan (unik `user_id + entry_date + meal_type`): `photo_path`, `food_name`, `calories`, `protein_g`, `ai_status` (`pending`/`done`/`failed`), `ai_error`, plus kolom suntingan `edited_food_name`, `edited_calories`, `edited_protein_g` yang dibiarkan `NULL` selama belum diedit. Kolom suntingan ditambahkan otomatis saat server start (migrasi tanpa menghapus data).
 
@@ -85,6 +87,16 @@ Buka <http://localhost:3000/dashboard>. Halaman ini menampilkan:
 - Kartu per pengguna berisi identitas (email, BMI, body fat, streak) dan tab **Harian / Mingguan / Bulanan**.
   - Harian: kalori vs batas, protein vs minimal, bar progres, makan `x/3`, langkah, olahraga, progres `x/7`, serta badge "Protein tercapai/kurang", "Kalori dalam batas/melebihi", dan "Hari lengkap".
   - Mingguan (7 hari) dan bulanan (30 hari): rata-rata kalori, jumlah hari protein tercapai, hari kalori melebihi batas, hari lengkap, hari tercatat, total makan, langkah, dan durasi olahraga.
+- Setiap kartu punya tautan **Lihat detail** ke `/dashboard/:userId`.
+
+### Detail peserta `/dashboard/:userId`
+
+Menampilkan satu peserta secara utuh:
+
+- Profil: email, tanggal lahir, usia, gender, tinggi, berat, body fat, BMI, tanggal bergabung, streak, serta target protein minimal dan kalori maksimal dengan progres hari ini.
+- Ringkasan tiga periode: hari ini, 7 hari, dan 30 hari (kalori, protein, makan, puasa, hari tercatat, hari lengkap).
+- Daftar catatan harian 30 hari terakhir (yang ada isinya, terbaru di atas): deklarasi, steps, olahraga, durasi, jendela puasa (jam makan terakhir → buka puasa) dan durasinya, total protein/kalori hari itu, serta tiga slot makan.
+- Setiap foto makan ditampilkan sebagai thumbnail yang bisa diketuk untuk membuka ukuran penuh; hasil AI dan suntingannya ditandai (`AI` / `Suntingan`) beserta nilai asli AI bila sudah disunting.
 
 Halaman ini **tidak memiliki autentikasi**: siapa pun yang membuka URL tersebut dapat melihat data semua pengguna. Batasi akses (misalnya di balik login admin) sebelum dipakai publik.
 
@@ -92,11 +104,11 @@ Halaman ini **tidak memiliki autentikasi**: siapa pun yang membuka URL tersebut 
 
 | Method | Endpoint                                          | Keterangan                                        |
 | ------ | ------------------------------------------------- | ------------------------------------------------- |
-| POST   | `/api/users`                                      | Buat profil, atau muat profil lama bila `email` sudah ada (`existed: true`). Respons menyertakan `recommendation` |
+| POST   | `/api/users`                                      | Buat profil (butuh `birthDate` `YYYY-MM-DD`), atau muat profil lama bila `email` sudah ada (`existed: true`). Respons menyertakan `birthDate`, `age` hasil hitung, dan `recommendation` |
 | GET    | `/api/users/:userId`                              | Profil + BMI                                      |
 | PATCH  | `/api/users/:userId`                              | Perbarui profil                                   |
 | GET    | `/api/users/:userId/days/:date`                   | Entri, 3 slot makan, total, progres               |
-| PUT    | `/api/users/:userId/days/:date/entry`             | Simpan deklarasi + aktivitas                      |
+| PUT    | `/api/users/:userId/days/:date/entry`             | Simpan deklarasi + aktivitas + `lastMealTime`/`fastBreakTime` (`HH:MM`) |
 | POST   | `/api/users/:userId/days/:date/meals`             | Upload foto makan (multipart `photo`, `mealType`) dan analisis AI |
 | PUT    | `/api/users/:userId/meals/:mealId`                | Simpan suntingan hasil AI (tanpa menimpa hasil AI) |
 | DELETE | `/api/users/:userId/meals/:mealId/edit`           | Kembalikan ke hasil AI (hapus suntingan)          |
@@ -104,6 +116,7 @@ Halaman ini **tidak memiliki autentikasi**: siapa pun yang membuka URL tersebut 
 | DELETE | `/api/users/:userId/meals/:mealId`                | Hapus foto + hasil analisis                       |
 | GET    | `/api/users/:userId/overview?days=7`              | Riwayat makan harian dan streak                   |
 | GET    | `/api/dashboard`                                  | Ringkasan semua pengguna (harian, mingguan, bulanan) |
+| GET    | `/api/dashboard/users/:userId`                    | Detail satu peserta: profil, ringkasan, dan catatan 30 hari beserta foto |
 
 Upload dibatasi 6 MB dengan tipe JPG/PNG/WEBP. Jika analisis AI gagal (kuota, jaringan, atau key salah), foto tetap tersimpan dan respons berisi `aiStatus: "failed"` beserta pesan error singkat.
 
@@ -117,7 +130,9 @@ Upload dibatasi 6 MB dengan tipe JPG/PNG/WEBP. Jika analisis AI gagal (kuota, ja
 │   ├── app.js
 │   ├── dashboard.html  # halaman /dashboard
 │   ├── dashboard.css
-│   └── dashboard.js
+│   ├── dashboard.js
+│   ├── detail.html     # halaman /dashboard/:userId
+│   └── detail.js
 ├── server/
 │   ├── index.js        # Express + endpoint
 │   ├── ai.js           # OpenAI vision (kalori & protein)

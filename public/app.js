@@ -10,7 +10,7 @@ const els = {
   formProfile: $('#form-profile'),
   inputEmail: $('#input-email'),
   inputName: $('#input-name'),
-  inputAge: $('#input-age'),
+  inputBirthDate: $('#input-birthdate'),
   inputHeight: $('#input-height'),
   inputWeight: $('#input-weight'),
   inputBodyFat: $('#input-bodyfat'),
@@ -41,6 +41,9 @@ const els = {
   inputSteps: $('#input-steps'),
   inputSport: $('#input-sport'),
   inputDuration: $('#input-duration'),
+  inputLastMeal: $('#input-lastmeal'),
+  inputFastBreak: $('#input-fastbreak'),
+  fastingNote: $('#fasting-note'),
   dayError: $('#day-error'),
   dayNote: $('#day-note'),
   btnSaveDay: $('#btn-save-day'),
@@ -54,7 +57,7 @@ const els = {
   profileName: $('#profile-name'),
   profileSub: $('#profile-sub'),
   profileEmail: $('#profile-email'),
-  statAge: $('#stat-age'),
+  statBirth: $('#stat-birth'),
   statGender: $('#stat-gender'),
   statHeight: $('#stat-height'),
   statWeight: $('#stat-weight'),
@@ -79,7 +82,7 @@ const els = {
   formEditProfile: $('#form-edit-profile'),
   editEmail: $('#edit-email'),
   editName: $('#edit-name'),
-  editAge: $('#edit-age'),
+  editBirthDate: $('#edit-birthdate'),
   editHeight: $('#edit-height'),
   editWeight: $('#edit-weight'),
   editBodyFat: $('#edit-bodyfat'),
@@ -147,6 +150,28 @@ function formatTime(date = new Date()) {
   return new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit' }).format(date);
 }
 
+function formatBirthDate(isoDate) {
+  if (!isoDate) return '—';
+  return new Intl.DateTimeFormat('id-ID', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }).format(parseISO(isoDate));
+}
+
+function fastingLabel(lastMealTime, fastBreakTime) {
+  if (!lastMealTime || !fastBreakTime) return 'Durasi puasa: —';
+  const toMinutes = (time) => {
+    const [hours, minutes] = time.split(':').map(Number);
+    return hours * 60 + minutes;
+  };
+  let diff = toMinutes(fastBreakTime) - toMinutes(lastMealTime);
+  if (diff <= 0) diff += 24 * 60;
+  const hours = Math.floor(diff / 60);
+  const minutes = diff % 60;
+  return `Durasi puasa: ${hours} jam${minutes ? ` ${minutes} menit` : ''}`;
+}
+
 function esc(value) {
   return String(value ?? '')
     .replaceAll('&', '&amp;')
@@ -204,6 +229,7 @@ function userPath(suffix = '') {
 /* ------------------------------------------------------------------- boot */
 
 async function boot() {
+  setupDateInputs();
   const savedId = localStorage.getItem(STORAGE_KEY);
   if (!savedId) {
     showOnboarding();
@@ -256,7 +282,7 @@ function renderProfile() {
   els.profileName.textContent = user.name;
   els.profileSub.textContent = `${user.age} tahun · ${GENDER_LABEL[user.gender] ?? '-'}`;
   els.profileEmail.textContent = user.email ?? '—';
-  els.statAge.textContent = `${user.age} th`;
+  els.statBirth.textContent = formatBirthDate(user.birthDate);
   els.statGender.textContent = GENDER_LABEL[user.gender] ?? '-';
   els.statHeight.textContent = `${user.heightCm} cm`;
   els.statWeight.textContent = `${user.weightKg} kg`;
@@ -275,6 +301,9 @@ async function loadDay(date) {
   els.inputSteps.value = data.entry.steps ?? '';
   els.inputSport.value = data.entry.sport ?? '';
   els.inputDuration.value = data.entry.durationMinutes ?? '';
+  els.inputLastMeal.value = data.entry.lastMealTime ?? '';
+  els.inputFastBreak.value = data.entry.fastBreakTime ?? '';
+  els.fastingNote.textContent = fastingLabel(data.entry.lastMealTime, data.entry.fastBreakTime);
   showError(els.dayError, '');
   els.dayNote.textContent = '';
   renderDayStrip();
@@ -530,6 +559,8 @@ els.formDay.addEventListener('submit', async (event) => {
     steps: els.inputSteps.value === '' ? null : Number(els.inputSteps.value),
     sport: els.inputSport.value.trim(),
     durationMinutes: els.inputDuration.value === '' ? null : Number(els.inputDuration.value),
+    lastMealTime: els.inputLastMeal.value || null,
+    fastBreakTime: els.inputFastBreak.value || null,
   };
 
   try {
@@ -541,6 +572,12 @@ els.formDay.addEventListener('submit', async (event) => {
     state.day.entry = result.entry;
     state.day.progress = result.progress;
     els.inputDeclaration.value = result.entry.declaration;
+    els.inputLastMeal.value = result.entry.lastMealTime ?? '';
+    els.inputFastBreak.value = result.entry.fastBreakTime ?? '';
+    els.fastingNote.textContent = fastingLabel(
+      result.entry.lastMealTime,
+      result.entry.fastBreakTime,
+    );
     els.dayNote.textContent = `Tersimpan ${formatTime()}`;
     renderHeroProgress();
     toast('Tersimpan.');
@@ -693,7 +730,7 @@ $('#btn-edit-profile').addEventListener('click', () => {
   if (!user) return;
   els.editEmail.value = user.email ?? '';
   els.editName.value = user.name;
-  els.editAge.value = user.age;
+  els.editBirthDate.value = user.birthDate ?? '';
   els.editHeight.value = user.heightCm;
   els.editWeight.value = user.weightKg;
   els.editBodyFat.value = user.bodyFat ?? '';
@@ -708,7 +745,7 @@ els.formEditProfile.addEventListener('submit', async (event) => {
   const gender = els.formEditProfile.querySelector('input[name="editGender"]:checked')?.value;
   const payload = {
     name: els.editName.value.trim(),
-    age: Number(els.editAge.value),
+    birthDate: els.editBirthDate.value,
     gender,
     heightCm: Number(els.editHeight.value),
     weightKg: Number(els.editWeight.value),
@@ -758,7 +795,7 @@ els.formProfile.addEventListener('submit', async (event) => {
   const payload = {
     email: els.inputEmail.value.trim().toLowerCase(),
     name: els.inputName.value.trim(),
-    age: Number(els.inputAge.value),
+    birthDate: els.inputBirthDate.value,
     gender: els.formProfile.querySelector('input[name="gender"]:checked')?.value,
     heightCm: Number(els.inputHeight.value),
     weightKg: Number(els.inputWeight.value),
@@ -771,6 +808,10 @@ els.formProfile.addEventListener('submit', async (event) => {
   }
   if (payload.name.length < 2) {
     showError(els.onboardingError, 'Nama minimal 2 karakter.');
+    return;
+  }
+  if (!payload.birthDate) {
+    showError(els.onboardingError, 'Tanggal lahir wajib diisi.');
     return;
   }
 
@@ -802,6 +843,22 @@ function updateBmiPreview() {
 
 els.inputHeight.addEventListener('input', updateBmiPreview);
 els.inputWeight.addEventListener('input', updateBmiPreview);
+
+function setupDateInputs() {
+  const today = todayISO();
+  const earliest = `${new Date().getFullYear() - 110}-01-01`;
+  [els.inputBirthDate, els.editBirthDate].forEach((input) => {
+    input.max = today;
+    input.min = earliest;
+  });
+}
+
+function updateFastingNote() {
+  els.fastingNote.textContent = fastingLabel(els.inputLastMeal.value, els.inputFastBreak.value);
+}
+
+els.inputLastMeal.addEventListener('input', updateFastingNote);
+els.inputFastBreak.addEventListener('input', updateFastingNote);
 
 /* --------------------------------------------------------------- modals */
 

@@ -81,9 +81,15 @@ export async function ensureSchema() {
     ['edited_protein_g', 'DECIMAL(6, 1) NULL'],
   ]);
 
+  await ensureColumns('daily_entries', [
+    ['last_meal_time', 'TIME NULL'],
+    ['fast_break_time', 'TIME NULL'],
+  ]);
+
   await ensureColumns('users', [
     ['email', 'VARCHAR(160) NULL'],
     ['body_fat', 'DECIMAL(4, 1) NULL'],
+    ['birth_date', 'DATE NULL'],
   ]);
   await ensureIndex('users', 'uq_users_email', 'UNIQUE KEY uq_users_email (email)');
 }

@@ -33,6 +33,13 @@ function clampPercent(value, max) {
   return Math.min(100, Math.max(0, Math.round((value / max) * 100)));
 }
 
+function fastingText(minutes) {
+  if (minutes === null || minutes === undefined) return '—';
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return `${hours} jam${rest ? ` ${rest} mnt` : ''}`;
+}
+
 function formatLongDate(isoDate) {
   return new Intl.DateTimeFormat('id-ID', {
     weekday: 'long',
@@ -92,6 +99,7 @@ function dailyGrid(user) {
       <div><dt>Makan</dt><dd>${daily.meals}/3</dd></div>
       <div><dt>Langkah</dt><dd>${daily.steps === null || daily.steps === undefined ? '—' : fmt(daily.steps)}</dd></div>
       <div><dt>Olahraga</dt><dd>${esc(sport)}</dd></div>
+      <div><dt>Puasa</dt><dd>${fastingText(daily.fastingMinutes)}</dd></div>
       <div><dt>Progres</dt><dd>${daily.progressDone}/7</dd></div>
     </dl>`;
 }
@@ -153,6 +161,12 @@ function cardHtml(user) {
       </header>
       ${isDaily && user.daily.declaration ? `<p class="u-decl">“${esc(user.daily.declaration)}”</p>` : ''}
       ${body}
+      <a class="u-detail" href="/dashboard/${user.id}">
+        Lihat detail
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+          <path d="M9 5l7 7-7 7" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </a>
     </article>`;
 }
 
