@@ -67,7 +67,8 @@ input {
 }
 
 input[type="date"],
-input[type="time"] {
+input[type="time"],
+input[type="datetime-local"] {
   -webkit-appearance: none;
   appearance: none;
   display: block;
@@ -331,6 +332,7 @@ input[type="number"],
 input[type="email"],
 input[type="date"],
 input[type="time"],
+input[type="datetime-local"],
 textarea {
   width: 100%;
   min-height: 48px;
@@ -1257,6 +1259,7 @@ input[readonly] {
 .fasting-note {
   font-size: 12px;
   font-weight: 600;
+  line-height: 1.45;
   color: var(--accent-dark);
   background: var(--accent-soft);
   border-radius: 9px;

@@ -40,6 +40,18 @@ function fastingText(minutes) {
   return `${hours} jam${rest ? ` ${rest} mnt` : ''}`;
 }
 
+function dateTimeShort(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat('id-ID', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
 function formatLongDate(isoDate) {
   return new Intl.DateTimeFormat('id-ID', {
     weekday: 'long',
@@ -90,17 +102,19 @@ function dailyBars(user) {
 
 function dailyGrid(user) {
   const daily = user.daily;
-  const sport = daily.sport
-    ? `${daily.sport}${daily.durationMinutes ? ` · ${daily.durationMinutes} mnt` : ''}`
-    : '—';
+  const sport = daily.sport || '—';
+  const fastingRange =
+    daily.lastMealAt && daily.fastBreakAt
+      ? `${dateTimeShort(daily.lastMealAt)} → ${dateTimeShort(daily.fastBreakAt)}`
+      : '';
 
   return `
     <dl class="u-grid">
       <div><dt>Makan</dt><dd>${daily.meals}/3</dd></div>
       <div><dt>Langkah</dt><dd>${daily.steps === null || daily.steps === undefined ? '—' : fmt(daily.steps)}</dd></div>
       <div><dt>Olahraga</dt><dd>${esc(sport)}</dd></div>
-      <div><dt>Puasa</dt><dd>${fastingText(daily.fastingMinutes)}</dd></div>
-      <div><dt>Progres</dt><dd>${daily.progressDone}/7</dd></div>
+      <div><dt>Puasa</dt><dd title="${esc(fastingRange)}">${fastingText(daily.fastingMinutes)}</dd></div>
+      <div><dt>Progres</dt><dd>${daily.progressDone}/${daily.progressTotal}</dd></div>
     </dl>`;
 }
 
@@ -111,8 +125,10 @@ function dailyBadges(user) {
       ${badge(daily.proteinMet ? 'Protein tercapai' : 'Protein kurang', daily.proteinMet ? 'ok' : 'warn')}
       ${badge(daily.calorieOver ? 'Kalori melebihi' : 'Kalori dalam batas', daily.calorieOver ? 'bad' : 'ok')}
       ${badge(
-        daily.progressDone >= 7 ? 'Hari lengkap' : `Progres ${daily.progressDone}/7`,
-        daily.progressDone >= 7 ? 'ok' : 'muted',
+        daily.progressDone >= daily.progressTotal
+          ? 'Hari lengkap'
+          : `Progres ${daily.progressDone}/${daily.progressTotal}`,
+        daily.progressDone >= daily.progressTotal ? 'ok' : 'muted',
       )}
     </div>`;
 }
@@ -128,7 +144,6 @@ function periodGrid(user, period) {
       <div><dt>Hari tercatat</dt><dd>${data.trackedDays}/${data.days}</dd></div>
       <div><dt>Total makan</dt><dd>${fmt(data.meals)}</dd></div>
       <div><dt>Langkah</dt><dd>${fmt(data.steps)}</dd></div>
-      <div><dt>Olahraga</dt><dd>${fmt(data.minutes)} mnt</dd></div>
     </dl>`;
 }
 

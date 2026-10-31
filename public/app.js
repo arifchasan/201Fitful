@@ -40,7 +40,6 @@ const els = {
   inputDeclaration: $('#input-declaration'),
   inputSteps: $('#input-steps'),
   inputSport: $('#input-sport'),
-  inputDuration: $('#input-duration'),
   inputLastMeal: $('#input-lastmeal'),
   inputFastBreak: $('#input-fastbreak'),
   fastingNote: $('#fasting-note'),
@@ -96,7 +95,7 @@ const GENDER_LABEL = { male: 'Pria', female: 'Wanita' };
 const MEAL_LABELS = { breakfast: 'Sarapan', lunch: 'Siang', dinner: 'Malam' };
 const MEAL_ORDER = ['breakfast', 'lunch', 'dinner'];
 const MAX_PHOTO_BYTES = 6 * 1024 * 1024;
-const DAY_TOTAL = 7;
+const DAY_TOTAL = 3;
 
 const state = {
   user: null,
@@ -159,17 +158,30 @@ function formatBirthDate(isoDate) {
   }).format(parseISO(isoDate));
 }
 
-function fastingLabel(lastMealTime, fastBreakTime) {
-  if (!lastMealTime || !fastBreakTime) return 'Durasi puasa: —';
-  const toMinutes = (time) => {
-    const [hours, minutes] = time.split(':').map(Number);
-    return hours * 60 + minutes;
-  };
-  let diff = toMinutes(fastBreakTime) - toMinutes(lastMealTime);
-  if (diff <= 0) diff += 24 * 60;
-  const hours = Math.floor(diff / 60);
-  const minutes = diff % 60;
-  return `Durasi puasa: ${hours} jam${minutes ? ` ${minutes} menit` : ''}`;
+function formatDateTimeShort(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat('id-ID', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
+/** Catatan puasa: tanggal + jam terakhir makan dan buka puasa, beserta durasinya. */
+function fastingLabel(lastMealAt, fastBreakAt) {
+  const startLabel = formatDateTimeShort(lastMealAt);
+  const endLabel = formatDateTimeShort(fastBreakAt);
+  if (!startLabel || !endLabel) return 'Durasi puasa: —';
+
+  const minutes = Math.round((new Date(fastBreakAt).getTime() - new Date(lastMealAt).getTime()) / 60000);
+  if (!(minutes > 0)) return 'Waktu buka puasa harus setelah terakhir makan.';
+
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return `${startLabel} → ${endLabel} · ${hours} jam${rest ? ` ${rest} menit` : ''}`;
 }
 
 function esc(value) {
@@ -300,10 +312,9 @@ async function loadDay(date) {
   els.inputDeclaration.value = data.entry.declaration ?? '';
   els.inputSteps.value = data.entry.steps ?? '';
   els.inputSport.value = data.entry.sport ?? '';
-  els.inputDuration.value = data.entry.durationMinutes ?? '';
-  els.inputLastMeal.value = data.entry.lastMealTime ?? '';
-  els.inputFastBreak.value = data.entry.fastBreakTime ?? '';
-  els.fastingNote.textContent = fastingLabel(data.entry.lastMealTime, data.entry.fastBreakTime);
+  els.inputLastMeal.value = data.entry.lastMealAt ?? '';
+  els.inputFastBreak.value = data.entry.fastBreakAt ?? '';
+  els.fastingNote.textContent = fastingLabel(data.entry.lastMealAt, data.entry.fastBreakAt);
   showError(els.dayError, '');
   els.dayNote.textContent = '';
   renderDayStrip();
@@ -324,11 +335,17 @@ function renderDayStrip() {
       const classes = ['day-btn'];
       if (isSelected) classes.push('is-selected');
       if (isToday) classes.push('is-today');
-      if (previous?.meals >= 3) classes.push('is-complete');
-      else if (previous?.meals > 0) classes.push('has-progress');
+      if (previous?.complete) classes.push('is-complete');
+      else if (previous?.tracked) classes.push('has-progress');
+
+      const title = previous?.complete
+        ? 'Hari lengkap'
+        : previous?.tracked
+          ? `${previous.progressDone}/${previous.progressTotal} bagian`
+          : 'Belum ada catatan';
 
       return `
-        <button type="button" class="${classes.join(' ')}" data-date="${date}" aria-pressed="${isSelected}" title="${previous?.meals ? `${previous.meals}/3 makan` : 'Belum ada catatan'}">
+        <button type="button" class="${classes.join(' ')}" data-date="${date}" aria-pressed="${isSelected}" title="${title}">
           <span class="dow">${new Intl.DateTimeFormat('id-ID', { weekday: 'short' }).format(parseISO(date))}</span>
           <span class="dom">${parseISO(date).getDate()}</span>
           <span class="day-dot"></span>
@@ -558,10 +575,18 @@ els.formDay.addEventListener('submit', async (event) => {
     declaration: els.inputDeclaration.value.trim(),
     steps: els.inputSteps.value === '' ? null : Number(els.inputSteps.value),
     sport: els.inputSport.value.trim(),
-    durationMinutes: els.inputDuration.value === '' ? null : Number(els.inputDuration.value),
-    lastMealTime: els.inputLastMeal.value || null,
-    fastBreakTime: els.inputFastBreak.value || null,
+    lastMealAt: els.inputLastMeal.value || null,
+    fastBreakAt: els.inputFastBreak.value || null,
   };
+
+  if (Boolean(payload.lastMealAt) !== Boolean(payload.fastBreakAt)) {
+    showError(
+      els.dayError,
+      'Isi tanggal & waktu terakhir makan dan buka puasa sekaligus, atau kosongkan keduanya.',
+    );
+    els.btnSaveDay.disabled = false;
+    return;
+  }
 
   try {
     const result = await api(userPath(`/days/${state.selectedDate}/entry`), {
@@ -572,12 +597,9 @@ els.formDay.addEventListener('submit', async (event) => {
     state.day.entry = result.entry;
     state.day.progress = result.progress;
     els.inputDeclaration.value = result.entry.declaration;
-    els.inputLastMeal.value = result.entry.lastMealTime ?? '';
-    els.inputFastBreak.value = result.entry.fastBreakTime ?? '';
-    els.fastingNote.textContent = fastingLabel(
-      result.entry.lastMealTime,
-      result.entry.fastBreakTime,
-    );
+    els.inputLastMeal.value = result.entry.lastMealAt ?? '';
+    els.inputFastBreak.value = result.entry.fastBreakAt ?? '';
+    els.fastingNote.textContent = fastingLabel(result.entry.lastMealAt, result.entry.fastBreakAt);
     els.dayNote.textContent = `Tersimpan ${formatTime()}`;
     renderHeroProgress();
     toast('Tersimpan.');
@@ -851,10 +873,22 @@ function setupDateInputs() {
     input.max = today;
     input.min = earliest;
   });
+
+  // Catatan puasa berisi waktu yang sudah terjadi, bukan rencana.
+  const now = new Date();
+  const nowLocal = `${today}T${String(now.getHours()).padStart(2, '0')}:${String(
+    now.getMinutes(),
+  ).padStart(2, '0')}`;
+  [els.inputLastMeal, els.inputFastBreak].forEach((input) => {
+    input.max = nowLocal;
+  });
 }
 
 function updateFastingNote() {
-  els.fastingNote.textContent = fastingLabel(els.inputLastMeal.value, els.inputFastBreak.value);
+  els.fastingNote.textContent = fastingLabel(
+    els.inputLastMeal.value || null,
+    els.inputFastBreak.value || null,
+  );
 }
 
 els.inputLastMeal.addEventListener('input', updateFastingNote);

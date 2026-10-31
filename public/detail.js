@@ -54,6 +54,18 @@ function fastingText(minutes) {
   return `${hours} jam${rest ? ` ${rest} mnt` : ''}`;
 }
 
+function dateTimeShort(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat('id-ID', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
 function percentOf(value, max) {
   if (!max) return 0;
   return Math.min(100, Math.max(0, Math.round((value / max) * 100)));
@@ -266,10 +278,9 @@ function dayHtml(day) {
       <dl class="day-grid">
         <div><dt>Steps</dt><dd>${entry.steps === null ? '—' : fmt(entry.steps)}</dd></div>
         <div><dt>Olahraga</dt><dd>${sport}</dd></div>
-        <div><dt>Durasi</dt><dd>${entry.durationMinutes === null ? '—' : `${fmt(entry.durationMinutes)} mnt`}</dd></div>
         <div><dt>Puasa</dt><dd>${fastingText(entry.fastingMinutes)}${
-          entry.lastMealTime && entry.fastBreakTime
-            ? `<span class="day-sub">${esc(entry.lastMealTime)} → ${esc(entry.fastBreakTime)}</span>`
+          entry.lastMealAt && entry.fastBreakAt
+            ? `<span class="day-sub">${esc(dateTimeShort(entry.lastMealAt))} → ${esc(dateTimeShort(entry.fastBreakAt))}</span>`
             : ''
         }</dd></div>
         <div><dt>Protein</dt><dd>${fmt(round1(day.totals.proteinG))} g <span class="day-sub">/ ${fmt(user.recommendation.proteinMinG)} g</span></dd></div>

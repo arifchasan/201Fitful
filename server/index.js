@@ -78,30 +78,37 @@ function ageFromBirthDate(isoDate) {
   return age;
 }
 
-const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const DATETIME_RE = /^(\d{4}-\d{2}-\d{2})[T ]([01]\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/;
 
-function parseTime(value, label) {
+/** Catatan puasa memakai tanggal + jam, bukan sekadar jam. */
+function parseDateTime(value, label) {
   if (value === undefined || value === null || value === '') return null;
-  const text = String(value).trim().slice(0, 5);
-  if (!TIME_RE.test(text)) throw new HttpError(400, `${label} harus berformat HH:MM.`);
-  return text;
+  const match = DATETIME_RE.exec(String(value).trim());
+  if (!match || !isValidDate(match[1])) {
+    throw new HttpError(400, `${label} harus berisi tanggal dan jam.`);
+  }
+  return `${match[1]} ${match[2]}:${match[3]}:00`;
 }
 
-function timeOnly(value) {
+/** "YYYY-MM-DD HH:MM:SS" → "YYYY-MM-DDTHH:MM" untuk input datetime-local. */
+function dateTimeInput(value) {
   if (!value) return null;
-  return String(value).slice(0, 5);
+  return String(value).slice(0, 16).replace(' ', 'T');
 }
 
-/** Lama puasa dalam menit; melewati tengah malam dihitung ke hari berikutnya. */
-function fastingMinutes(lastMealTime, fastBreakTime) {
-  if (!lastMealTime || !fastBreakTime) return null;
-  const toMinutes = (time) => {
-    const [hours, minutes] = time.split(':').map(Number);
-    return hours * 60 + minutes;
-  };
-  let diff = toMinutes(fastBreakTime) - toMinutes(lastMealTime);
-  if (diff <= 0) diff += 24 * 60;
-  return diff;
+function localDate(value) {
+  if (!value) return null;
+  const date = new Date(String(value).slice(0, 16).replace(' ', 'T'));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** Lama puasa dalam menit, dihitung dari catatan tanggal + jam. */
+function fastingMinutes(lastMealAt, fastBreakAt) {
+  const start = localDate(lastMealAt);
+  const end = localDate(fastBreakAt);
+  if (!start || !end) return null;
+  const diff = Math.round((end.getTime() - start.getTime()) / 60000);
+  return diff > 0 ? diff : null;
 }
 
 function parseNumber(value, label, { min, max }) {
@@ -378,30 +385,53 @@ app.patch('/api/users/:userId', async (req, res) => {
 /* ------------------------------------------------------------------- days */
 
 function entryShape(row) {
-  const lastMealTime = timeOnly(row?.last_meal_time);
-  const fastBreakTime = timeOnly(row?.fast_break_time);
+  const lastMealAt = dateTimeInput(row?.last_meal_at);
+  const fastBreakAt = dateTimeInput(row?.fast_break_at);
   return {
     declaration: row?.declaration_text ?? '',
     steps: row?.steps === null || row?.steps === undefined ? null : Number(row.steps),
     sport: row?.sport ?? '',
-    durationMinutes:
-      row?.duration_minutes === null || row?.duration_minutes === undefined
-        ? null
-        : Number(row.duration_minutes),
-    lastMealTime,
-    fastBreakTime,
-    fastingMinutes: fastingMinutes(lastMealTime, fastBreakTime),
+    lastMealAt,
+    fastBreakAt,
+    fastingMinutes: fastingMinutes(lastMealAt, fastBreakAt),
   };
 }
 
-async function buildDay(userId, date) {
+/** Entri dianggap berisi bila salah satu bagiannya diisi, termasuk catatan puasa. */
+function entryHasContent(entryData) {
+  return (
+    entryData.declaration.trim().length > 0 ||
+    entryData.steps !== null ||
+    entryData.sport.trim().length > 0 ||
+    Boolean(entryData.lastMealAt) ||
+    Boolean(entryData.fastBreakAt)
+  );
+}
+
+/** Aktivitas dianggap tercatat bila steps atau jenis olahraga terisi. */
+function hasActivity(entryData) {
+  return entryData.steps !== null || entryData.sport.trim().length > 0;
+}
+
+/** Progres hari: deklarasi, aktivitas, dan protein tercapai (bukan jumlah pola makan). */
+function dayChecks(entryData, proteinG, proteinTargetG) {
+  const checks = {
+    declaration: entryData.declaration.trim().length > 0,
+    activity: hasActivity(entryData),
+    protein: proteinG > 0 && proteinG >= proteinTargetG,
+  };
+  return { done: Object.values(checks).filter(Boolean).length, total: 3, checks };
+}
+
+async function buildDay(userRow, date) {
+  const user = shapeUser(userRow);
   const [[entry]] = await pool.query(
     'SELECT * FROM daily_entries WHERE user_id = ? AND entry_date = ?',
-    [userId, date],
+    [user.id, date],
   );
   const [mealRows] = await pool.query(
     'SELECT * FROM meals WHERE user_id = ? AND entry_date = ?',
-    [userId, date],
+    [user.id, date],
   );
 
   const entryData = entryShape(entry);
@@ -410,14 +440,13 @@ async function buildDay(userId, date) {
     meals[row.meal_type] = shapeMeal(row);
   }
 
-  const mealCount = mealRows.length;
-  const doneFields = [
-    entryData.declaration.trim().length > 0,
-    entryData.steps !== null,
-    entryData.sport.trim().length > 0,
-    entryData.durationMinutes !== null,
-  ].filter(Boolean).length;
-  const done = doneFields + mealCount;
+  const totals = {
+    calories: Math.round(mealRows.reduce((sum, r) => sum + effectiveNutrition(r).calories, 0)),
+    proteinG:
+      Math.round(mealRows.reduce((sum, r) => sum + effectiveNutrition(r).proteinG, 0) * 10) /
+      10,
+    meals: mealRows.length,
+  };
 
   return {
     date,
@@ -425,17 +454,8 @@ async function buildDay(userId, date) {
     aiReady: aiConfigured(),
     entry: entryData,
     meals,
-    totals: {
-      calories: Math.round(
-        mealRows.reduce((sum, r) => sum + effectiveNutrition(r).calories, 0),
-      ),
-      proteinG:
-        Math.round(
-          mealRows.reduce((sum, r) => sum + effectiveNutrition(r).proteinG, 0) * 10,
-        ) / 10,
-      meals: mealCount,
-    },
-    progress: { done, total: 7 },
+    totals,
+    progress: dayChecks(entryData, totals.proteinG, user.recommendation.proteinMinG),
   };
 }
 
@@ -443,7 +463,7 @@ app.get('/api/users/:userId/days/:date', async (req, res) => {
   const user = await findUser(req.params.userId);
   const { date } = req.params;
   if (!isValidDate(date)) throw new HttpError(400, 'Format tanggal harus YYYY-MM-DD.');
-  res.json(await buildDay(user.id, date));
+  res.json(await buildDay(user, date));
 });
 
 app.put('/api/users/:userId/days/:date/entry', async (req, res) => {
@@ -455,24 +475,38 @@ app.put('/api/users/:userId/days/:date/entry', async (req, res) => {
   const declaration = String(req.body.declaration ?? '').trim().slice(0, 500);
   const steps = optionalInt(req.body.steps, 'Steps', 200000);
   const sport = optionalText(req.body.sport, 120);
-  const durationMinutes = optionalInt(req.body.durationMinutes, 'Durasi', 1440);
-  const lastMealTime = parseTime(req.body.lastMealTime, 'Waktu makan terakhir');
-  const fastBreakTime = parseTime(req.body.fastBreakTime, 'Waktu buka puasa');
+  const lastMealAt = parseDateTime(req.body.lastMealAt, 'Tanggal & waktu makan terakhir');
+  const fastBreakAt = parseDateTime(req.body.fastBreakAt, 'Tanggal & waktu buka puasa');
+
+  if (Boolean(lastMealAt) !== Boolean(fastBreakAt)) {
+    throw new HttpError(
+      400,
+      'Isi tanggal & waktu makan terakhir dan buka puasa sekaligus, atau kosongkan keduanya.',
+    );
+  }
+  if (lastMealAt && fastBreakAt) {
+    const minutes = fastingMinutes(lastMealAt, fastBreakAt);
+    if (minutes === null) {
+      throw new HttpError(400, 'Waktu buka puasa harus setelah makan terakhir.');
+    }
+    if (minutes > 7 * 24 * 60) {
+      throw new HttpError(400, 'Rentang puasa maksimal 7 hari.');
+    }
+  }
 
   await pool.query(
-    `INSERT INTO daily_entries (user_id, entry_date, declaration_text, steps, sport, duration_minutes, last_meal_time, fast_break_time)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO daily_entries (user_id, entry_date, declaration_text, steps, sport, last_meal_at, fast_break_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
        declaration_text = VALUES(declaration_text),
        steps = VALUES(steps),
        sport = VALUES(sport),
-       duration_minutes = VALUES(duration_minutes),
-       last_meal_time = VALUES(last_meal_time),
-       fast_break_time = VALUES(fast_break_time)`,
-    [user.id, date, declaration, steps, sport, durationMinutes, lastMealTime, fastBreakTime],
+       last_meal_at = VALUES(last_meal_at),
+       fast_break_at = VALUES(fast_break_at)`,
+    [user.id, date, declaration, steps, sport, lastMealAt, fastBreakAt],
   );
 
-  const day = await buildDay(user.id, date);
+  const day = await buildDay(user, date);
   res.json({ entry: day.entry, progress: day.progress });
 });
 
@@ -538,7 +572,7 @@ app.post('/api/users/:userId/days/:date/meals', upload.single('photo'), async (r
       [user.id, date, mealType],
     );
     const meal = await analyzeAndStore(rows[0]);
-    const day = await buildDay(user.id, date);
+    const day = await buildDay(user, date);
 
     res.status(201).json({ meal, totals: day.totals, progress: day.progress });
   } catch (error) {
@@ -567,7 +601,7 @@ app.put('/api/users/:userId/meals/:mealId', async (req, res) => {
   );
 
   const [rows] = await pool.query('SELECT * FROM meals WHERE id = ?', [mealRow.id]);
-  const day = await buildDay(user.id, mealRow.entry_date);
+  const day = await buildDay(user, mealRow.entry_date);
   res.json({ meal: shapeMeal(rows[0]), totals: day.totals, progress: day.progress });
 });
 
@@ -581,7 +615,7 @@ app.delete('/api/users/:userId/meals/:mealId/edit', async (req, res) => {
   );
 
   const [rows] = await pool.query('SELECT * FROM meals WHERE id = ?', [mealRow.id]);
-  const day = await buildDay(user.id, mealRow.entry_date);
+  const day = await buildDay(user, mealRow.entry_date);
   res.json({ meal: shapeMeal(rows[0]), totals: day.totals, progress: day.progress });
 });
 
@@ -594,7 +628,7 @@ app.post('/api/users/:userId/meals/:mealId/analyze', async (req, res) => {
     [mealRow.id],
   );
   const meal = await analyzeAndStore(mealRow);
-  const day = await buildDay(user.id, mealRow.entry_date);
+  const day = await buildDay(user, mealRow.entry_date);
 
   res.json({ meal, totals: day.totals, progress: day.progress });
 });
@@ -606,19 +640,21 @@ app.delete('/api/users/:userId/meals/:mealId', async (req, res) => {
   await pool.query('DELETE FROM meals WHERE id = ?', [mealRow.id]);
   await removePhoto(mealRow.photo_path);
 
-  const day = await buildDay(user.id, mealRow.entry_date);
+  const day = await buildDay(user, mealRow.entry_date);
   res.json({ ok: true, totals: day.totals, progress: day.progress });
 });
 
 /* ---------------------------------------------------------------- overview */
 
 app.get('/api/users/:userId/overview', async (req, res) => {
-  const user = await findUser(req.params.userId);
+  const userRow = await findUser(req.params.userId);
+  const user = shapeUser(userRow);
   const days = Math.min(Math.max(Number(req.query.days) || 7, 1), 60);
 
   const [rows] = await pool.query(
     `SELECT entry_date, COUNT(*) AS meals,
-            COALESCE(SUM(COALESCE(edited_calories, calories)), 0) AS calories
+            COALESCE(SUM(COALESCE(edited_calories, calories)), 0) AS calories,
+            COALESCE(SUM(COALESCE(edited_protein_g, protein_g)), 0) AS protein
        FROM meals
       WHERE user_id = ?
       GROUP BY entry_date
@@ -626,10 +662,20 @@ app.get('/api/users/:userId/overview', async (req, res) => {
     [user.id],
   );
 
+  const [entryRows] = await pool.query(
+    'SELECT * FROM daily_entries WHERE user_id = ? AND entry_date >= ?',
+    [user.id, addDaysISO(todayString(), -60)],
+  );
+  const entryByDate = new Map(entryRows.map((row) => [row.entry_date, row]));
+
   const byDate = new Map(
     rows.map((r) => [
       r.entry_date,
-      { meals: Number(r.meals), calories: Math.round(Number(r.calories)) },
+      {
+        meals: Number(r.meals),
+        calories: Math.round(Number(r.calories)),
+        protein: round1(Number(r.protein)),
+      },
     ]),
   );
 
@@ -641,17 +687,27 @@ app.get('/api/users/:userId/overview', async (req, res) => {
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
       d.getDate(),
     ).padStart(2, '0')}`;
-    const entry = byDate.get(key) ?? { meals: 0, calories: 0 };
-    history.push({ date: key, ...entry });
+    const mealData = byDate.get(key) ?? { meals: 0, calories: 0, protein: 0 };
+    const entry = entryByDate.get(key);
+    const checks = dayChecks(entryShape(entry), mealData.protein, user.recommendation.proteinMinG);
+    history.push({
+      date: key,
+      meals: mealData.meals,
+      calories: mealData.calories,
+      tracked: entryHasContent(entryShape(entry)) || mealData.meals > 0,
+      complete: checks.done === checks.total,
+      progressDone: checks.done,
+      progressTotal: checks.total,
+    });
   }
 
   let streak = 0;
   for (const day of [...history].reverse()) {
-    if (day.meals === 0) {
+    if (!day.tracked) {
       if (streak === 0) continue;
       break;
     }
-    if (day.meals >= 3) streak += 1;
+    if (day.complete) streak += 1;
     else break;
   }
 
@@ -678,7 +734,6 @@ function summarizePeriod(user, entryMap, mealMap, startDate, periodDays) {
   let calories = 0;
   let proteinG = 0;
   let steps = 0;
-  let minutes = 0;
   let proteinMetDays = 0;
   let calorieOverDays = 0;
   let completeDays = 0;
@@ -687,7 +742,8 @@ function summarizePeriod(user, entryMap, mealMap, startDate, periodDays) {
     const date = addDaysISO(startDate, i);
     const entry = entryMap.get(`${user.id}|${date}`);
     const dayMeals = mealMap.get(`${user.id}|${date}`) ?? [];
-    if (!entry && !dayMeals.length) continue;
+    const dayEntry = entryShape(entry);
+    if (!entryHasContent(dayEntry) && !dayMeals.length) continue;
 
     trackedDays += 1;
     const dayCalories = Math.round(
@@ -701,18 +757,19 @@ function summarizePeriod(user, entryMap, mealMap, startDate, periodDays) {
     calories += dayCalories;
     proteinG += dayProtein;
     steps += Number(entry?.steps ?? 0);
-    minutes += Number(entry?.duration_minutes ?? 0);
 
     if (dayProtein >= rec.proteinMinG) proteinMetDays += 1;
     if (dayCalories > rec.calorieMax) calorieOverDays += 1;
 
-    const fields = [
-      entry?.declaration_text?.trim().length > 0,
-      entry?.steps !== null && entry?.steps !== undefined,
-      entry?.sport?.trim().length > 0,
-      entry?.duration_minutes !== null && entry?.duration_minutes !== undefined,
-    ].filter(Boolean).length;
-    if (fields + dayMeals.length >= 7) completeDays += 1;
+    // Hari lengkap: deklarasi + aktivitas + target protein tercapai.
+    if (
+      dayEntry.declaration.trim() &&
+      hasActivity(dayEntry) &&
+      dayProtein > 0 &&
+      dayProtein >= rec.proteinMinG
+    ) {
+      completeDays += 1;
+    }
   }
 
   return {
@@ -722,7 +779,6 @@ function summarizePeriod(user, entryMap, mealMap, startDate, periodDays) {
     calories: Math.round(calories),
     proteinG: round1(proteinG),
     steps,
-    minutes,
     proteinMetDays,
     calorieOverDays,
     completeDays,
@@ -767,41 +823,45 @@ app.get('/api/dashboard', async (_req, res) => {
 
     const todayEntry = entryMap.get(`${user.id}|${today}`) ?? null;
     const todayMeals = mealMap.get(`${user.id}|${today}`) ?? [];
-    const progressDone = [
-      todayEntry?.declaration_text?.trim().length > 0,
-      todayEntry?.steps !== null && todayEntry?.steps !== undefined,
-      todayEntry?.sport?.trim().length > 0,
-      todayEntry?.duration_minutes !== null && todayEntry?.duration_minutes !== undefined,
-    ].filter(Boolean).length + todayMeals.length;
+    const todayEntryData = entryShape(todayEntry);
+    const todayChecks = dayChecks(
+      todayEntryData,
+      daily.proteinG,
+      user.recommendation.proteinMinG,
+    );
 
     Object.assign(daily, {
       date: today,
       tracked: daily.trackedDays > 0,
-      declaration: todayEntry?.declaration_text ?? '',
-      sport: todayEntry?.sport ?? '',
-      steps: todayEntry?.steps ?? null,
-      durationMinutes: todayEntry?.duration_minutes ?? null,
-      lastMealTime: timeOnly(todayEntry?.last_meal_time),
-      fastBreakTime: timeOnly(todayEntry?.fast_break_time),
-      fastingMinutes: fastingMinutes(
-        timeOnly(todayEntry?.last_meal_time),
-        timeOnly(todayEntry?.fast_break_time),
-      ),
+      declaration: todayEntryData.declaration,
+      sport: todayEntryData.sport,
+      steps: todayEntryData.steps,
+      lastMealAt: todayEntryData.lastMealAt,
+      fastBreakAt: todayEntryData.fastBreakAt,
+      fastingMinutes: todayEntryData.fastingMinutes,
       proteinMet: daily.proteinG >= user.recommendation.proteinMinG && daily.proteinG > 0,
       calorieOver: daily.calories > user.recommendation.calorieMax,
       mealsComplete: todayMeals.length >= 3,
-      progressDone,
+      progressDone: todayChecks.done,
+      progressTotal: todayChecks.total,
+      checks: todayChecks.checks,
     });
 
     let streak = 0;
     for (let i = 0; i < 30; i += 1) {
       const date = addDaysISO(today, -i);
-      const count = (mealMap.get(`${user.id}|${date}`) ?? []).length;
-      if (count === 0) {
+      const dayEntry = entryShape(entryMap.get(`${user.id}|${date}`));
+      const dayMeals = mealMap.get(`${user.id}|${date}`) ?? [];
+      if (!entryHasContent(dayEntry) && !dayMeals.length) {
         if (streak === 0) continue;
         break;
       }
-      if (count >= 3) streak += 1;
+      const checks = dayChecks(
+        dayEntry,
+        round1(dayMeals.reduce((sum, meal) => sum + effectiveNutrition(meal).proteinG, 0)),
+        user.recommendation.proteinMinG,
+      );
+      if (checks.done === checks.total) streak += 1;
       else break;
     }
 
@@ -870,34 +930,33 @@ app.get('/api/dashboard/users/:userId', async (req, res) => {
       meals: dayMeals.length,
     };
 
-    const fields = [
-      entryData.declaration.trim().length > 0,
-      entryData.steps !== null,
-      entryData.sport.trim().length > 0,
-      entryData.durationMinutes !== null,
-    ].filter(Boolean).length;
-
     days.push({
       date,
       today: date === today,
-      tracked: Boolean(entry) || dayMeals.length > 0,
+      tracked: entryHasContent(entryData) || dayMeals.length > 0,
       entry: entryData,
       meals: MEAL_TYPES.map((type) => dayMeals.find((m) => m.meal_type === type))
         .filter(Boolean)
         .map(shapeMeal),
       totals,
-      progress: { done: fields + dayMeals.length, total: 7 },
+      progress: dayChecks(entryData, totals.proteinG, user.recommendation.proteinMinG),
     });
   }
 
   for (let i = 0; i < 30; i += 1) {
     const date = addDaysISO(today, -i);
-    const count = (mealMap.get(`${user.id}|${date}`) ?? []).length;
-    if (count === 0) {
+    const dayEntry = entryShape(entryMap.get(`${user.id}|${date}`));
+    const dayMeals = mealMap.get(`${user.id}|${date}`) ?? [];
+    if (!entryHasContent(dayEntry) && !dayMeals.length) {
       if (streak === 0) continue;
       break;
     }
-    if (count >= 3) streak += 1;
+    const checks = dayChecks(
+      dayEntry,
+      round1(dayMeals.reduce((sum, meal) => sum + effectiveNutrition(meal).proteinG, 0)),
+      user.recommendation.proteinMinG,
+    );
+    if (checks.done === checks.total) streak += 1;
     else break;
   }
 

@@ -12,7 +12,7 @@ const config = {
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
-  dateStrings: ['DATE'],
+  dateStrings: ['DATE', 'DATETIME'],
   timezone: 'local',
 };
 
@@ -36,13 +36,17 @@ export async function ensureDatabase() {
   }
 }
 
-/** Menambah kolom baru pada tabel lama tanpa menghapus data. */
-async function ensureColumns(table, columns) {
+async function columnNames(table) {
   const [rows] = await pool.query(
     'SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?',
     [DB_NAME, table],
   );
-  const existing = new Set(rows.map((row) => row.COLUMN_NAME));
+  return new Set(rows.map((row) => row.COLUMN_NAME));
+}
+
+/** Menambah kolom baru pada tabel lama tanpa menghapus data. */
+async function ensureColumns(table, columns) {
+  const existing = await columnNames(table);
 
   for (const [column, definition] of columns) {
     if (!existing.has(column)) {
@@ -60,6 +64,24 @@ async function ensureIndex(table, indexName, definition) {
   if (!rows.length) {
     await pool.query(`ALTER TABLE \`${table}\` ADD ${definition}`);
   }
+}
+
+/** Pindahkan catatan jam puasa lama (TIME) ke catatan tanggal + jam (DATETIME). */
+async function migrateFastingRecords() {
+  const columns = await columnNames('daily_entries');
+  if (!columns.has('last_meal_time') || !columns.has('fast_break_time')) return;
+
+  await pool.query(
+    `UPDATE daily_entries
+        SET last_meal_at = TIMESTAMP(entry_date, last_meal_time)
+      WHERE last_meal_at IS NULL AND last_meal_time IS NOT NULL`,
+  );
+  await pool.query(
+    `UPDATE daily_entries
+        SET fast_break_at = TIMESTAMP(entry_date, fast_break_time)
+                          + INTERVAL (last_meal_time IS NOT NULL AND fast_break_time <= last_meal_time) DAY
+      WHERE fast_break_at IS NULL AND fast_break_time IS NOT NULL`,
+  );
 }
 
 /** Membuat tabel yang dibutuhkan bila belum ada. */
@@ -82,9 +104,10 @@ export async function ensureSchema() {
   ]);
 
   await ensureColumns('daily_entries', [
-    ['last_meal_time', 'TIME NULL'],
-    ['fast_break_time', 'TIME NULL'],
+    ['last_meal_at', 'DATETIME NULL'],
+    ['fast_break_at', 'DATETIME NULL'],
   ]);
+  await migrateFastingRecords();
 
   await ensureColumns('users', [
     ['email', 'VARCHAR(160) NULL'],
