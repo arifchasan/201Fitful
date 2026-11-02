@@ -333,6 +333,7 @@ input[type="email"],
 input[type="date"],
 input[type="time"],
 input[type="datetime-local"],
+select,
 textarea {
   width: 100%;
   min-height: 48px;
@@ -358,6 +359,7 @@ textarea::placeholder {
 }
 
 input:focus,
+select:focus,
 textarea:focus {
   outline: none;
   border-color: var(--accent);
@@ -399,6 +401,16 @@ input[readonly] {
   border: 1px solid #d2dfd9;
   border-radius: var(--radius-sm);
   min-height: 48px;
+}
+
+.segmented.segmented-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.field-hint {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
 }
 
 .segmented-option {
@@ -680,6 +692,21 @@ input[readonly] {
 
 .rec-now {
   font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.rec-detail {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.target-note {
+  margin-top: 10px;
+  font-size: 11px;
+  line-height: 1.45;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
@@ -1256,16 +1283,94 @@ input[readonly] {
   min-height: 1em;
 }
 
-.fasting-note {
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.45;
-  color: var(--accent-dark);
+.fasting-panel {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 12px;
   background: var(--accent-soft);
-  border-radius: 9px;
-  padding: 8px 11px;
+  border: 1px solid #cfe9dd;
   margin-bottom: 16px;
+}
+
+.fasting-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.fasting-status {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--accent-dark);
+}
+
+.fasting-clock {
+  font-size: 20px;
+  letter-spacing: -0.02em;
+  color: var(--ink);
   font-variant-numeric: tabular-nums;
+}
+
+.fasting-track {
+  height: 6px;
+  border-radius: 999px;
+  background: #d9ece4;
+  overflow: hidden;
+}
+
+.fasting-track span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.4s linear;
+}
+
+.fasting-track span.is-done {
+  background: #3d9bd6;
+}
+
+.fasting-sub {
+  font-size: 11.5px;
+  color: #4d665b;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+
+.fasting-targets {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.fasting-target {
+  border: 1px solid #cfe3da;
+  background: #fff;
+  color: #4d665b;
+  border-radius: 8px;
+  padding: 7px 0;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.fasting-target:hover {
+  border-color: var(--accent);
+  color: var(--accent-dark);
+}
+
+.fasting-target.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.fasting-target:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 /* ------------------------------------------------------------------ meals */

@@ -29,6 +29,21 @@ app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '7d', index: false }));
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const GENDERS = new Set(['male', 'female']);
+const ACTIVITY_LEVELS = {
+  sedentary: { factor: 1.2, label: 'Jarang bergerak' },
+  light: { factor: 1.375, label: 'Aktivitas ringan' },
+  moderate: { factor: 1.55, label: 'Aktivitas sedang' },
+  active: { factor: 1.725, label: 'Aktivitas tinggi' },
+  very_active: { factor: 1.9, label: 'Sangat aktif' },
+};
+const WEIGHT_GOALS = {
+  lose: { delta: -500, label: 'Turun berat' },
+  maintain: { delta: 0, label: 'Jaga berat' },
+  gain: { delta: 300, label: 'Naik berat' },
+};
+/** BMI tengah rentang normal, dipakai untuk berat badan ideal (quick method). */
+const IDEAL_BMI = 22;
+const PROTEIN_G_PER_KG_IBW = 1;
 const MEAL_TYPES = ['breakfast', 'lunch', 'dinner'];
 const MEAL_LABELS = { breakfast: 'sarapan', lunch: 'makan siang', dinner: 'makan malam' };
 
@@ -150,12 +165,46 @@ function bmiInfo(heightCm, weightKg) {
   return { bmi: Math.round(bmi * 10) / 10, bmiCategory: category };
 }
 
-function recommendations({ weightKg, heightCm, age, gender }) {
-  // Mifflin-St Jeor dengan faktor aktivitas ringan (1.375).
-  const bmr = 10 * weightKg + 6.25 * heightCm - 5 * age + (gender === 'male' ? 5 : -161);
+/** Berat badan ideal: IBW = 22 × tinggi(m)² (quick method). */
+function idealWeightKg(heightCm) {
+  const meters = heightCm / 100;
+  return Math.round(IDEAL_BMI * meters * meters * 10) / 10;
+}
+
+/**
+ * Anjuran harian:
+ * 1. IBW = 22 × tinggi(m)² (BMI tengah normal).
+ * 2. BMR Mifflin-St Jeor memakai IBW, bukan berat aktual.
+ * 3. TDEE = BMR × faktor aktivitas, lalu disesuaikan target berat badan.
+ * 4. Protein = 1 g × IBW (quick method).
+ */
+function recommendations({ heightCm, age, gender, activityLevel, weightGoal }) {
+  const ibwKg = idealWeightKg(heightCm);
+  const bmr = Math.round(
+    10 * ibwKg + 6.25 * heightCm - 5 * age + (gender === 'male' ? 5 : -161),
+  );
+  const activity = ACTIVITY_LEVELS[activityLevel] ?? ACTIVITY_LEVELS.light;
+  const goal = WEIGHT_GOALS[weightGoal] ?? WEIGHT_GOALS.maintain;
+  const tdee = Math.round(bmr * activity.factor);
+  // Jangan turun di bawah BMR (maupun 1.200 kkal) walau targetnya defisit.
+  const calorieMax = Math.round(Math.max(tdee + goal.delta, bmr, 1200) / 10) * 10;
+
   return {
-    proteinMinG: Math.round(weightKg * 1.2),
-    calorieMax: Math.round((bmr * 1.375) / 10) * 10,
+    ibwKg,
+    idealBmi: IDEAL_BMI,
+    bmr,
+    tdee,
+    activityLevel: ACTIVITY_LEVELS[activityLevel] ? activityLevel : 'light',
+    activityFactor: activity.factor,
+    activityLabel: activity.label,
+    weightGoal: WEIGHT_GOALS[weightGoal] ? weightGoal : 'maintain',
+    weightGoalLabel: goal.label,
+    calorieAdjustment: goal.delta,
+    calorieMax,
+    quickCaloriesLow: Math.round((ibwKg * 20) / 10) * 10,
+    quickCaloriesHigh: Math.round((ibwKg * 25) / 10) * 10,
+    proteinMinG: Math.round(ibwKg * PROTEIN_G_PER_KG_IBW),
+    proteinPerKgIbw: PROTEIN_G_PER_KG_IBW,
   };
 }
 
@@ -174,6 +223,8 @@ function shapeUser(row) {
     heightCm,
     weightKg,
     bodyFat: row.body_fat === null || row.body_fat === undefined ? null : Number(row.body_fat),
+    activityLevel: row.activity_level ?? 'light',
+    weightGoal: row.weight_goal ?? 'maintain',
   };
   return {
     ...profile,
@@ -266,7 +317,7 @@ function parseEmail(value) {
   return email;
 }
 
-function parseProfile(body, { withEmail = false } = {}) {
+function parseProfile(body, { withEmail = false, current = null } = {}) {
   const name = String(body.name ?? '').trim();
   if (name.length < 2 || name.length > 100) {
     throw new HttpError(400, 'Nama harus 2-100 karakter.');
@@ -288,7 +339,27 @@ function parseProfile(body, { withEmail = false } = {}) {
   const heightCm = Math.round(parseNumber(body.heightCm, 'Tinggi badan', { min: 80, max: 250 }) * 10) / 10;
   const weightKg = Math.round(parseNumber(body.weightKg, 'Berat badan', { min: 20, max: 300 }) * 10) / 10;
   const bodyFat = optionalNumber(body.bodyFat, 'Body fat', { min: 2, max: 70 });
-  const profile = { name, birthDate, age, gender: body.gender, heightCm, weightKg, bodyFat };
+
+  const activityLevel = body.activityLevel
+    ? String(body.activityLevel)
+    : (current?.activity_level ?? 'light');
+  if (!ACTIVITY_LEVELS[activityLevel]) {
+    throw new HttpError(400, 'Aktivitas harian tidak dikenal.');
+  }
+  const weightGoal = body.weightGoal ? String(body.weightGoal) : (current?.weight_goal ?? 'maintain');
+  if (!WEIGHT_GOALS[weightGoal]) throw new HttpError(400, 'Target berat badan tidak dikenal.');
+
+  const profile = {
+    name,
+    birthDate,
+    age,
+    gender: body.gender,
+    heightCm,
+    weightKg,
+    bodyFat,
+    activityLevel,
+    weightGoal,
+  };
   if (withEmail) profile.email = parseEmail(body.email);
   return profile;
 }
@@ -333,7 +404,9 @@ app.post('/api/users', async (req, res) => {
 
   try {
     const [result] = await pool.query(
-      'INSERT INTO users (name, email, birth_date, age, gender, height_cm, weight_kg, body_fat) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      `INSERT INTO users
+         (name, email, birth_date, age, gender, height_cm, weight_kg, body_fat, activity_level, weight_goal)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         profile.name,
         profile.email,
@@ -343,6 +416,8 @@ app.post('/api/users', async (req, res) => {
         profile.heightCm,
         profile.weightKg,
         profile.bodyFat,
+        profile.activityLevel,
+        profile.weightGoal,
       ],
     );
     const user = await findUser(result.insertId);
@@ -361,11 +436,12 @@ app.get('/api/users/:userId', async (req, res) => {
 });
 
 app.patch('/api/users/:userId', async (req, res) => {
-  await findUser(req.params.userId);
-  const profile = parseProfile(req.body);
+  const current = await findUser(req.params.userId);
+  const profile = parseProfile(req.body, { current });
   await pool.query(
     `UPDATE users
-        SET name = ?, birth_date = ?, age = ?, gender = ?, height_cm = ?, weight_kg = ?, body_fat = ?
+        SET name = ?, birth_date = ?, age = ?, gender = ?, height_cm = ?, weight_kg = ?, body_fat = ?,
+            activity_level = ?, weight_goal = ?
       WHERE id = ?`,
     [
       profile.name,
@@ -375,6 +451,8 @@ app.patch('/api/users/:userId', async (req, res) => {
       profile.heightCm,
       profile.weightKg,
       profile.bodyFat,
+      profile.activityLevel,
+      profile.weightGoal,
       req.params.userId,
     ],
   );
@@ -394,7 +472,19 @@ function entryShape(row) {
     lastMealAt,
     fastBreakAt,
     fastingMinutes: fastingMinutes(lastMealAt, fastBreakAt),
+    fastingTargetHours:
+      row?.fasting_target_hours === null || row?.fasting_target_hours === undefined
+        ? 16
+        : Number(row.fasting_target_hours),
   };
+}
+
+/** Menit puasa yang masih berjalan (belum ada waktu buka puasa). */
+function openFastingMinutes(entryData) {
+  if (!entryData?.lastMealAt || entryData.fastBreakAt) return null;
+  const start = localDate(entryData.lastMealAt);
+  if (!start) return null;
+  return Math.max(0, Math.round((Date.now() - start.getTime()) / 60000));
 }
 
 /** Entri dianggap berisi bila salah satu bagiannya diisi, termasuk catatan puasa. */
@@ -435,6 +525,7 @@ async function buildDay(userRow, date) {
   );
 
   const entryData = entryShape(entry);
+  if (date === todayString()) entryData.fastingElapsedMinutes = openFastingMinutes(entryData);
   const meals = { breakfast: null, lunch: null, dinner: null };
   for (const row of mealRows) {
     meals[row.meal_type] = shapeMeal(row);
@@ -477,12 +568,14 @@ app.put('/api/users/:userId/days/:date/entry', async (req, res) => {
   const sport = optionalText(req.body.sport, 120);
   const lastMealAt = parseDateTime(req.body.lastMealAt, 'Tanggal & waktu makan terakhir');
   const fastBreakAt = parseDateTime(req.body.fastBreakAt, 'Tanggal & waktu buka puasa');
+  const fastingTargetHours = optionalInt(req.body.fastingTargetHours, 'Target puasa', 24) ?? 16;
+  if (fastingTargetHours < 8) {
+    throw new HttpError(400, 'Target puasa minimal 8 jam.');
+  }
 
-  if (Boolean(lastMealAt) !== Boolean(fastBreakAt)) {
-    throw new HttpError(
-      400,
-      'Isi tanggal & waktu makan terakhir dan buka puasa sekaligus, atau kosongkan keduanya.',
-    );
+  // Waktu makan terakhir saja sudah cukup: timer puasa langsung berjalan.
+  if (!lastMealAt && fastBreakAt) {
+    throw new HttpError(400, 'Isi waktu makan terakhir sebelum waktu buka puasa.');
   }
   if (lastMealAt && fastBreakAt) {
     const minutes = fastingMinutes(lastMealAt, fastBreakAt);
@@ -493,17 +586,28 @@ app.put('/api/users/:userId/days/:date/entry', async (req, res) => {
       throw new HttpError(400, 'Rentang puasa maksimal 7 hari.');
     }
   }
+  const latest = Date.now() + 5 * 60000;
+  for (const [value, label] of [
+    [lastMealAt, 'Waktu makan terakhir'],
+    [fastBreakAt, 'Waktu buka puasa'],
+  ]) {
+    if (value && localDate(value).getTime() > latest) {
+      throw new HttpError(400, `${label} belum terjadi.`);
+    }
+  }
 
   await pool.query(
-    `INSERT INTO daily_entries (user_id, entry_date, declaration_text, steps, sport, last_meal_at, fast_break_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO daily_entries
+       (user_id, entry_date, declaration_text, steps, sport, last_meal_at, fast_break_at, fasting_target_hours)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
        declaration_text = VALUES(declaration_text),
        steps = VALUES(steps),
        sport = VALUES(sport),
        last_meal_at = VALUES(last_meal_at),
-       fast_break_at = VALUES(fast_break_at)`,
-    [user.id, date, declaration, steps, sport, lastMealAt, fastBreakAt],
+       fast_break_at = VALUES(fast_break_at),
+       fasting_target_hours = VALUES(fasting_target_hours)`,
+    [user.id, date, declaration, steps, sport, lastMealAt, fastBreakAt, fastingTargetHours],
   );
 
   const day = await buildDay(user, date);
@@ -839,6 +943,8 @@ app.get('/api/dashboard', async (_req, res) => {
       lastMealAt: todayEntryData.lastMealAt,
       fastBreakAt: todayEntryData.fastBreakAt,
       fastingMinutes: todayEntryData.fastingMinutes,
+      fastingElapsedMinutes: openFastingMinutes(todayEntryData),
+      fastingTargetHours: todayEntryData.fastingTargetHours,
       proteinMet: daily.proteinG >= user.recommendation.proteinMinG && daily.proteinG > 0,
       calorieOver: daily.calories > user.recommendation.calorieMax,
       mealsComplete: todayMeals.length >= 3,
@@ -919,6 +1025,7 @@ app.get('/api/dashboard/users/:userId', async (req, res) => {
     const entry = entryMap.get(`${user.id}|${date}`);
     const dayMeals = mealMap.get(`${user.id}|${date}`) ?? [];
     const entryData = entryShape(entry);
+    if (date === today) entryData.fastingElapsedMinutes = openFastingMinutes(entryData);
 
     const totals = {
       calories: Math.round(

@@ -103,17 +103,24 @@ function dailyBars(user) {
 function dailyGrid(user) {
   const daily = user.daily;
   const sport = daily.sport || '—';
+  const fastingTarget = daily.fastingTargetHours ?? 16;
+  const fastingOpen =
+    daily.fastingElapsedMinutes !== null && daily.fastingElapsedMinutes !== undefined;
   const fastingRange =
     daily.lastMealAt && daily.fastBreakAt
       ? `${dateTimeShort(daily.lastMealAt)} → ${dateTimeShort(daily.fastBreakAt)}`
       : '';
+  const fastingValue = fastingOpen
+    ? `${fastingText(daily.fastingElapsedMinutes)} (berjalan)`
+    : fastingText(daily.fastingMinutes);
+  const fastingTitle = [fastingRange, `target ${fastingTarget} jam`].filter(Boolean).join(' · ');
 
   return `
     <dl class="u-grid">
       <div><dt>Makan</dt><dd>${daily.meals}/3</dd></div>
       <div><dt>Langkah</dt><dd>${daily.steps === null || daily.steps === undefined ? '—' : fmt(daily.steps)}</dd></div>
       <div><dt>Olahraga</dt><dd>${esc(sport)}</dd></div>
-      <div><dt>Puasa</dt><dd title="${esc(fastingRange)}">${fastingText(daily.fastingMinutes)}</dd></div>
+      <div><dt>Puasa</dt><dd title="${esc(fastingTitle)}">${fastingValue}</dd></div>
       <div><dt>Progres</dt><dd>${daily.progressDone}/${daily.progressTotal}</dd></div>
     </dl>`;
 }

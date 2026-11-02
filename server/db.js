@@ -106,6 +106,7 @@ export async function ensureSchema() {
   await ensureColumns('daily_entries', [
     ['last_meal_at', 'DATETIME NULL'],
     ['fast_break_at', 'DATETIME NULL'],
+    ['fasting_target_hours', 'TINYINT UNSIGNED NOT NULL DEFAULT 16'],
   ]);
   await migrateFastingRecords();
 
@@ -113,6 +114,8 @@ export async function ensureSchema() {
     ['email', 'VARCHAR(160) NULL'],
     ['body_fat', 'DECIMAL(4, 1) NULL'],
     ['birth_date', 'DATE NULL'],
+    ['activity_level', "VARCHAR(20) NOT NULL DEFAULT 'light'"],
+    ['weight_goal', "VARCHAR(20) NOT NULL DEFAULT 'maintain'"],
   ]);
   await ensureIndex('users', 'uq_users_email', 'UNIQUE KEY uq_users_email (email)');
 }

@@ -107,6 +107,10 @@ function profileHtml() {
         <div><dt>Berat</dt><dd>${fmt(user.weightKg)} kg</dd></div>
         <div><dt>Body fat</dt><dd>${user.bodyFat !== null ? `${user.bodyFat}%` : '—'}</dd></div>
         <div><dt>BMI</dt><dd>${user.bmi !== null ? `${user.bmi} · ${esc(user.bmiCategory ?? '')}` : '—'}</dd></div>
+        <div><dt>BB ideal</dt><dd>${fmt(user.recommendation.ibwKg)} kg</dd></div>
+        <div><dt>BMR</dt><dd>${fmt(user.recommendation.bmr)} kkal</dd></div>
+        <div><dt>Aktivitas</dt><dd>${esc(user.recommendation.activityLabel ?? '—')}</dd></div>
+        <div><dt>Target</dt><dd>${esc(user.recommendation.weightGoalLabel ?? '—')}</dd></div>
         <div><dt>Gabung</dt><dd>${esc(formatBirthDate((user.createdAt ?? '').slice(0, 10)) || '—')}</dd></div>
       </dl>
 
@@ -127,6 +131,11 @@ function profileHtml() {
           state.data.summary.daily.calories,
           user.recommendation.calorieMax,
         )}%"></span></div>
+        <p class="target-note">BMR ${fmt(user.recommendation.bmr)} kkal × ${user.recommendation.activityFactor} = ${fmt(
+          user.recommendation.tdee,
+        )} kkal · quick method ${fmt(user.recommendation.quickCaloriesLow)}–${fmt(
+          user.recommendation.quickCaloriesHigh,
+        )} kkal · protein ${user.recommendation.proteinPerKgIbw ?? 1} g/kg BB ideal</p>
       </div>
     </section>`;
 }
@@ -143,7 +152,8 @@ function summaryHtml() {
   const weekly = summary.weekly;
   const monthly = summary.monthly;
   const today = state.data.days.find((day) => day.date === state.data.today);
-  const fasting = today?.entry?.fastingMinutes ?? null;
+  const fasting =
+    today?.entry?.fastingMinutes ?? today?.entry?.fastingElapsedMinutes ?? null;
 
   const rows = [
     {
@@ -255,6 +265,19 @@ function dayHtml(day) {
   const entry = day.entry;
   const sport = entry.sport ? esc(entry.sport) : '—';
   const declarations = entry.declaration ? `<p class="day-decl">“${esc(entry.declaration)}”</p>` : '';
+  const fastingTarget = entry.fastingTargetHours ?? 16;
+  const fastingMinutes = entry.fastingMinutes ?? entry.fastingElapsedMinutes ?? null;
+  const fastingRunning =
+    entry.fastingMinutes === null &&
+    entry.fastingElapsedMinutes !== null &&
+    entry.fastingElapsedMinutes !== undefined;
+  const fastingSub = fastingRunning
+    ? `Target ${fastingTarget} jam · ${esc(dateTimeShort(entry.lastMealAt))} → sekarang`
+    : entry.lastMealAt && entry.fastBreakAt
+      ? `${esc(dateTimeShort(entry.lastMealAt))} → ${esc(dateTimeShort(entry.fastBreakAt))} · target ${fastingTarget} jam`
+      : entry.lastMealAt
+        ? `Target ${fastingTarget} jam`
+        : '';
 
   const meals = ['breakfast', 'lunch', 'dinner']
     .map((type) => mealHtml(type, day.meals.find((meal) => meal.type === type)))
@@ -278,11 +301,9 @@ function dayHtml(day) {
       <dl class="day-grid">
         <div><dt>Steps</dt><dd>${entry.steps === null ? '—' : fmt(entry.steps)}</dd></div>
         <div><dt>Olahraga</dt><dd>${sport}</dd></div>
-        <div><dt>Puasa</dt><dd>${fastingText(entry.fastingMinutes)}${
-          entry.lastMealAt && entry.fastBreakAt
-            ? `<span class="day-sub">${esc(dateTimeShort(entry.lastMealAt))} → ${esc(dateTimeShort(entry.fastBreakAt))}</span>`
-            : ''
-        }</dd></div>
+        <div><dt>Puasa</dt><dd>${fastingText(fastingMinutes)}${
+          fastingRunning ? ' <span class="day-sub">(berjalan)</span>' : ''
+        }<span class="day-sub">${fastingSub}</span></dd></div>
         <div><dt>Protein</dt><dd>${fmt(round1(day.totals.proteinG))} g <span class="day-sub">/ ${fmt(user.recommendation.proteinMinG)} g</span></dd></div>
         <div><dt>Kalori</dt><dd class="${day.totals.calories > user.recommendation.calorieMax ? 'is-over' : ''}">${fmt(day.totals.calories)} kkal</dd></div>
       </dl>

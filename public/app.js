@@ -14,6 +14,7 @@ const els = {
   inputHeight: $('#input-height'),
   inputWeight: $('#input-weight'),
   inputBodyFat: $('#input-bodyfat'),
+  inputActivity: $('#input-activity'),
   bmiValue: $('#bmi-value'),
   bmiCategory: $('#bmi-category'),
   onboardingError: $('#onboarding-error'),
@@ -34,6 +35,9 @@ const els = {
   recCalorieTarget: $('#rec-calorie-target'),
   recCalorieBar: $('#rec-calorie-bar'),
   recCalorieNow: $('#rec-calorie-now'),
+  recProteinBasis: $('#rec-protein-basis'),
+  recCalorieBasis: $('#rec-calorie-basis'),
+  recQuickMethod: $('#rec-quick-method'),
 
   dayStrip: $('#day-strip'),
   formDay: $('#form-day'),
@@ -42,7 +46,11 @@ const els = {
   inputSport: $('#input-sport'),
   inputLastMeal: $('#input-lastmeal'),
   inputFastBreak: $('#input-fastbreak'),
-  fastingNote: $('#fasting-note'),
+  fastingStatus: $('#fasting-status'),
+  fastingClock: $('#fasting-clock'),
+  fastingBar: $('#fasting-bar'),
+  fastingSub: $('#fasting-sub'),
+  fastingTargets: $('.fasting-targets'),
   dayError: $('#day-error'),
   dayNote: $('#day-note'),
   btnSaveDay: $('#btn-save-day'),
@@ -61,6 +69,8 @@ const els = {
   statHeight: $('#stat-height'),
   statWeight: $('#stat-weight'),
   statBodyFat: $('#stat-bodyfat'),
+  statActivity: $('#stat-activity'),
+  statGoal: $('#stat-goal'),
   statBmi: $('#stat-bmi'),
   statBmiCategory: $('#stat-bmi-category'),
   historyList: $('#history-list'),
@@ -85,6 +95,7 @@ const els = {
   editHeight: $('#edit-height'),
   editWeight: $('#edit-weight'),
   editBodyFat: $('#edit-bodyfat'),
+  editActivity: $('#edit-activity'),
   editError: $('#edit-error'),
 
   toast: $('#toast'),
@@ -92,6 +103,15 @@ const els = {
 
 const STORAGE_KEY = 'fitintake.userId';
 const GENDER_LABEL = { male: 'Pria', female: 'Wanita' };
+const ACTIVITY_LABEL = {
+  sedentary: 'Jarang',
+  light: 'Ringan',
+  moderate: 'Sedang',
+  active: 'Tinggi',
+  very_active: 'Sangat aktif',
+};
+const GOAL_LABEL = { lose: 'Turun', maintain: 'Jaga', gain: 'Naik' };
+const FASTING_TARGETS = [12, 14, 16, 18];
 const MEAL_LABELS = { breakfast: 'Sarapan', lunch: 'Siang', dinner: 'Malam' };
 const MEAL_ORDER = ['breakfast', 'lunch', 'dinner'];
 const MAX_PHOTO_BYTES = 6 * 1024 * 1024;
@@ -105,6 +125,7 @@ const state = {
   uploadingMeal: null,
   mealView: {},
   editingMeal: null,
+  fastingTarget: 16,
 };
 
 /* ------------------------------------------------------------------ utils */
@@ -170,18 +191,105 @@ function formatDateTimeShort(value) {
   }).format(date);
 }
 
-/** Catatan puasa: tanggal + jam terakhir makan dan buka puasa, beserta durasinya. */
-function fastingLabel(lastMealAt, fastBreakAt) {
-  const startLabel = formatDateTimeShort(lastMealAt);
-  const endLabel = formatDateTimeShort(fastBreakAt);
-  if (!startLabel || !endLabel) return 'Durasi puasa: —';
+/** Durasi menit → "12 jam 30 mnt". */
+function durationText(minutes) {
+  const total = Math.max(0, Math.round(minutes));
+  const hours = Math.floor(total / 60);
+  const rest = total % 60;
+  if (!hours) return `${rest} mnt`;
+  return `${hours} jam${rest ? ` ${rest} mnt` : ''}`;
+}
 
-  const minutes = Math.round((new Date(fastBreakAt).getTime() - new Date(lastMealAt).getTime()) / 60000);
-  if (!(minutes > 0)) return 'Waktu buka puasa harus setelah terakhir makan.';
+/** Milidetik → "08:12:45" untuk timer puasa. */
+function clockText(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return [h, m, s].map((part) => String(part).padStart(2, '0')).join(':');
+}
 
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  return `${startLabel} → ${endLabel} · ${hours} jam${rest ? ` ${rest} menit` : ''}`;
+function parseLocalDateTime(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** Timer puasa: berjalan real-time dari waktu makan terakhir sampai buka puasa. */
+function renderFasting() {
+  const target = state.fastingTarget || 16;
+  const targetMinutes = target * 60;
+
+  if (els.fastingTargets) {
+    els.fastingTargets.querySelectorAll('[data-target]').forEach((button) => {
+      const active = Number(button.dataset.target) === target;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-pressed', String(active));
+    });
+  }
+
+  const start = parseLocalDateTime(els.inputLastMeal.value);
+  const end = parseLocalDateTime(els.inputFastBreak.value);
+  const setBar = (percent, done = false) => {
+    els.fastingBar.style.width = `${Math.min(100, Math.max(0, percent))}%`;
+    els.fastingBar.classList.toggle('is-done', done);
+  };
+
+  if (!start) {
+    els.fastingStatus.textContent = 'Puasa belum dimulai';
+    els.fastingClock.textContent = '00:00:00';
+    setBar(0);
+    els.fastingSub.textContent = 'Isi waktu makan terakhir untuk memulai timer.';
+    return;
+  }
+
+  if (end) {
+    const minutes = Math.round((end.getTime() - start.getTime()) / 60000);
+    if (minutes <= 0) {
+      els.fastingStatus.textContent = 'Waktu belum valid';
+      els.fastingClock.textContent = '—';
+      setBar(0);
+      els.fastingSub.textContent = 'Buka puasa harus setelah waktu makan terakhir.';
+      return;
+    }
+    const reached = minutes >= targetMinutes;
+    els.fastingStatus.textContent = reached ? `Target ${target} jam tercapai` : 'Puasa selesai';
+    els.fastingClock.textContent = durationText(minutes);
+    setBar((minutes / targetMinutes) * 100, reached);
+    els.fastingSub.textContent = `${formatDateTimeShort(els.inputLastMeal.value)} → ${formatDateTimeShort(
+      els.inputFastBreak.value,
+    )} · target ${target} jam`;
+    return;
+  }
+
+  if (state.selectedDate !== todayISO()) {
+    els.fastingStatus.textContent = 'Buka puasa belum dicatat';
+    els.fastingClock.textContent = '—';
+    setBar(0);
+    els.fastingSub.textContent = `Mulai ${formatDateTimeShort(els.inputLastMeal.value)} · target ${target} jam`;
+    return;
+  }
+
+  const elapsedMs = Date.now() - start.getTime();
+  if (elapsedMs < 0) {
+    els.fastingStatus.textContent = 'Belum dimulai';
+    els.fastingClock.textContent = '00:00:00';
+    setBar(0);
+    els.fastingSub.textContent = 'Waktu makan terakhir masih di masa depan.';
+    return;
+  }
+
+  const elapsedMinutes = Math.floor(elapsedMs / 60000);
+  const remaining = targetMinutes - elapsedMinutes;
+  const breakAt = new Date(start.getTime() + targetMinutes * 60000);
+  els.fastingClock.textContent = clockText(elapsedMs);
+  els.fastingStatus.textContent =
+    remaining <= 0 ? `Target ${target} jam tercapai` : `Puasa berjalan · target ${target} jam`;
+  setBar((elapsedMinutes / targetMinutes) * 100, remaining <= 0);
+  els.fastingSub.textContent =
+    remaining <= 0
+      ? `Lebih ${durationText(-remaining)} dari target · target buka ${formatTime(breakAt)}`
+      : `${durationText(remaining)} lagi · target buka ${formatTime(breakAt)}`;
 }
 
 function esc(value) {
@@ -299,6 +407,8 @@ function renderProfile() {
   els.statHeight.textContent = `${user.heightCm} cm`;
   els.statWeight.textContent = `${user.weightKg} kg`;
   els.statBodyFat.textContent = user.bodyFat ? `${user.bodyFat}%` : '—';
+  els.statActivity.textContent = ACTIVITY_LABEL[user.activityLevel] ?? '—';
+  els.statGoal.textContent = GOAL_LABEL[user.weightGoal] ?? '—';
   els.statBmi.textContent = bmi ? bmi.value.toFixed(1) : '—';
   els.statBmiCategory.textContent = bmi ? bmi.category : '—';
   els.heroName.textContent = user.name.trim().split(/\s+/)[0];
@@ -314,7 +424,8 @@ async function loadDay(date) {
   els.inputSport.value = data.entry.sport ?? '';
   els.inputLastMeal.value = data.entry.lastMealAt ?? '';
   els.inputFastBreak.value = data.entry.fastBreakAt ?? '';
-  els.fastingNote.textContent = fastingLabel(data.entry.lastMealAt, data.entry.fastBreakAt);
+  state.fastingTarget = data.entry.fastingTargetHours ?? 16;
+  renderFasting();
   showError(els.dayError, '');
   els.dayNote.textContent = '';
   renderDayStrip();
@@ -371,6 +482,21 @@ function renderRecommendation() {
   els.recCalorieNow.textContent = `${totals.calories.toLocaleString('id-ID')} kkal`;
   els.recCalorieBar.style.width = `${Math.min(100, caloriePercent)}%`;
   els.recCalorieBar.classList.toggle('is-over', caloriePercent > 100);
+
+  const n = (value) => Number(value).toLocaleString('id-ID');
+  els.recProteinBasis.textContent = `${rec.proteinPerKgIbw ?? 1} g × BB ideal ${n(rec.ibwKg)} kg`;
+  const adjust =
+    rec.calorieAdjustment === 0
+      ? 'tanpa penyesuaian'
+      : `${rec.calorieAdjustment > 0 ? '+' : '−'} ${n(Math.abs(rec.calorieAdjustment))} kkal (${
+          rec.weightGoalLabel ?? GOAL_LABEL[rec.weightGoal] ?? 'target'
+        })`;
+  els.recCalorieBasis.textContent = `BMR ${n(rec.bmr)} kkal × ${rec.activityFactor} (${
+    rec.activityLabel
+  }) = ${n(rec.tdee)} kkal TDEE · ${adjust} → target ${n(rec.calorieMax)} kkal`;
+  els.recQuickMethod.textContent = `Quick method (IBW × 20–25): ${n(
+    rec.quickCaloriesLow,
+  )}–${n(rec.quickCaloriesHigh)} kkal`;
 }
 
 function renderHeroProgress() {
@@ -577,13 +703,20 @@ els.formDay.addEventListener('submit', async (event) => {
     sport: els.inputSport.value.trim(),
     lastMealAt: els.inputLastMeal.value || null,
     fastBreakAt: els.inputFastBreak.value || null,
+    fastingTargetHours: state.fastingTarget,
   };
 
-  if (Boolean(payload.lastMealAt) !== Boolean(payload.fastBreakAt)) {
-    showError(
-      els.dayError,
-      'Isi tanggal & waktu terakhir makan dan buka puasa sekaligus, atau kosongkan keduanya.',
-    );
+  if (!payload.lastMealAt && payload.fastBreakAt) {
+    showError(els.dayError, 'Isi waktu makan terakhir sebelum waktu buka puasa.');
+    els.btnSaveDay.disabled = false;
+    return;
+  }
+  if (
+    payload.lastMealAt &&
+    payload.fastBreakAt &&
+    new Date(payload.fastBreakAt) <= new Date(payload.lastMealAt)
+  ) {
+    showError(els.dayError, 'Waktu buka puasa harus setelah makan terakhir.');
     els.btnSaveDay.disabled = false;
     return;
   }
@@ -599,7 +732,8 @@ els.formDay.addEventListener('submit', async (event) => {
     els.inputDeclaration.value = result.entry.declaration;
     els.inputLastMeal.value = result.entry.lastMealAt ?? '';
     els.inputFastBreak.value = result.entry.fastBreakAt ?? '';
-    els.fastingNote.textContent = fastingLabel(result.entry.lastMealAt, result.entry.fastBreakAt);
+    state.fastingTarget = result.entry.fastingTargetHours ?? state.fastingTarget;
+    renderFasting();
     els.dayNote.textContent = `Tersimpan ${formatTime()}`;
     renderHeroProgress();
     toast('Tersimpan.');
@@ -756,8 +890,12 @@ $('#btn-edit-profile').addEventListener('click', () => {
   els.editHeight.value = user.heightCm;
   els.editWeight.value = user.weightKg;
   els.editBodyFat.value = user.bodyFat ?? '';
+  els.editActivity.value = user.activityLevel ?? 'light';
   els.formEditProfile.querySelector(`input[name="editGender"][value="${user.gender}"]`).checked =
     true;
+  els.formEditProfile.querySelector(
+    `input[name="editWeightGoal"][value="${user.weightGoal ?? 'maintain'}"]`,
+  ).checked = true;
   els.editError.hidden = true;
   openModal('modal-profile');
 });
@@ -772,6 +910,8 @@ els.formEditProfile.addEventListener('submit', async (event) => {
     heightCm: Number(els.editHeight.value),
     weightKg: Number(els.editWeight.value),
     bodyFat: els.editBodyFat.value === '' ? null : Number(els.editBodyFat.value),
+    activityLevel: els.editActivity.value,
+    weightGoal: els.formEditProfile.querySelector('input[name="editWeightGoal"]:checked')?.value,
   };
 
   const button = $('#btn-save-edit');
@@ -822,6 +962,8 @@ els.formProfile.addEventListener('submit', async (event) => {
     heightCm: Number(els.inputHeight.value),
     weightKg: Number(els.inputWeight.value),
     bodyFat: els.inputBodyFat.value === '' ? null : Number(els.inputBodyFat.value),
+    activityLevel: els.inputActivity.value,
+    weightGoal: els.formProfile.querySelector('input[name="weightGoal"]:checked')?.value,
   };
 
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.email)) {
@@ -884,15 +1026,18 @@ function setupDateInputs() {
   });
 }
 
-function updateFastingNote() {
-  els.fastingNote.textContent = fastingLabel(
-    els.inputLastMeal.value || null,
-    els.inputFastBreak.value || null,
-  );
-}
+els.inputLastMeal.addEventListener('input', renderFasting);
+els.inputFastBreak.addEventListener('input', renderFasting);
 
-els.inputLastMeal.addEventListener('input', updateFastingNote);
-els.inputFastBreak.addEventListener('input', updateFastingNote);
+els.fastingTargets.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-target]');
+  if (!button) return;
+  state.fastingTarget = Number(button.dataset.target);
+  renderFasting();
+});
+
+// Timer berjalan terus selama halaman terbuka.
+setInterval(renderFasting, 1000);
 
 /* --------------------------------------------------------------- modals */
 

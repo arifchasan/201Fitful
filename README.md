@@ -5,11 +5,11 @@ Jurnal kebugaran harian: tulis deklarasi, catat aktivitas, dan unggah foto makan
 ## Fitur
 
 - **Identifikasi email** — email unik menjadi identitas. Memasukkan email yang sudah terdaftar akan memuat profil dan seluruh data sebelumnya (tanpa membuat pengguna baru); data yang diketik ulang tidak menimpa profil lama.
-- **Onboarding profil** — email, nama, **tanggal lahir (hari/bulan/tahun)**, gender, tinggi, berat, dan **body fat opsional**; usia dihitung otomatis dari tanggal lahir, BMI juga dihitung otomatis.
-- **Anjuran harian** — setelah masuk, dashboard menampilkan estimasi **protein minimal** (1,2 g × berat badan) dan **kalori maksimal** (Mifflin-St Jeor × faktor aktivitas ringan 1,375), lengkap dengan progres asupan hari itu.
+- **Onboarding profil** — email, nama, **tanggal lahir (hari/bulan/tahun)**, gender, tinggi, berat, **body fat opsional**, **tingkat aktivitas harian**, dan **target berat badan (turun/jaga/naik)**; usia, BMI, berat badan ideal, dan anjuran kalori dihitung otomatis.
+- **Anjuran harian** — **berat badan ideal (IBW = 22 × tinggi(m)²)**, **BMR Mifflin-St Jeor memakai IBW**, lalu **TDEE = BMR × faktor aktivitas** dan penyesuaian target berat (−500 kkal turun / 0 jaga / +300 kkal naik, tidak pernah di bawah BMR). **Protein minimal = 1 g × IBW**. Kartu anjuran menampilkan rincian BMR → TDEE → target, ditambah rentang **quick method (IBW × 20–25 kkal)** sebagai pembanding.
 - **Deklarasi harian** — satu komitmen per hari.
 - **Aktivitas harian** — steps dan jenis olahraga.
-- **Catatan puasa** — mencatat **tanggal + jam terakhir makan** dan **tanggal + jam buka puasa** (bukan rencana ke depan); durasi puasa dihitung otomatis, termasuk rentang yang melewati tengah malam.
+- **Catatan & timer puasa** — mencatat **tanggal + jam terakhir makan** dan (opsional) **tanggal + jam buka puasa**, bukan rencana ke depan. Begitu waktu makan terakhir disimpan tanpa buka puasa, timer berjalan real-time dari waktu tersebut; target **12/14/16/18 jam** bisa dipilih per hari, lengkap dengan sisa waktu, perkiraan jam buka, dan progres target. Durasi puasa yang sudah selesai dihitung otomatis, termasuk rentang yang melewati tengah malam.
 - **Pola makan** — slot Sarapan, Siang, Malam. Setiap slot menerima satu foto; foto langsung dikirim ke **OpenAI vision** untuk estimasi kalori, protein, dan deskripsi singkat makanan.
 - **Edit hasil AI** — deskripsi, kalori, dan protein bisa disunting. Hasil asli AI tetap disimpan: tiap kartu punya tombol **AI / Suntingan** untuk membandingkan, dan suntingan bisa dikembalikan ke hasil AI kapan saja.
 - **Total harian** — total kalori dan protein (memakai suntingan bila ada) dari ketiga foto.
@@ -72,9 +72,9 @@ Jurnal kebugaran harian: tulis deklarasi, catat aktivitas, dan unggah foto makan
 
 ## Skema database
 
-**users** — profil pengguna (`id`, `name`, `email` unik, `birth_date`, `age`, `gender`, `height_cm`, `weight_kg`, `body_fat` opsional, timestamps). `birth_date` adalah sumber kebenaran usia; kolom `age` tetap diisi sebagai cache untuk pengguna lama yang belum punya tanggal lahir. Kolom email, index unik, body fat, dan birth date ditambahkan otomatis untuk database lama.
+**users** — profil pengguna (`id`, `name`, `email` unik, `birth_date`, `age`, `gender`, `height_cm`, `weight_kg`, `body_fat` opsional, `activity_level` (`sedentary`/`light`/`moderate`/`active`/`very_active`, default `light`), `weight_goal` (`lose`/`maintain`/`gain`, default `maintain`), timestamps). `birth_date` adalah sumber kebenaran usia; kolom `age` tetap diisi sebagai cache untuk pengguna lama yang belum punya tanggal lahir. Kolom email, index unik, body fat, birth date, activity level, dan weight goal ditambahkan otomatis untuk database lama.
 
-**daily_entries** — satu baris per pengguna per tanggal (unik `user_id + entry_date`): `declaration_text`, `steps`, `sport`, `last_meal_at`, `fast_break_at` (keduanya `DATETIME`, jadi tanggal ikut tersimpan). Durasi puasa tidak disimpan; dihitung dari dua catatan waktu tersebut setiap kali data dibaca. Database lama yang masih memakai kolom `last_meal_time`/`fast_break_time` (`TIME`) dimigrasikan otomatis saat server start: nilainya dipindahkan ke kolom baru dengan tanggal dari `entry_date`.
+**daily_entries** — satu baris per pengguna per tanggal (unik `user_id + entry_date`): `declaration_text`, `steps`, `sport`, `last_meal_at`, `fast_break_at` (keduanya `DATETIME`, jadi tanggal ikut tersimpan), dan `fasting_target_hours` (default 16). Durasi puasa selesai tidak disimpan; dihitung dari dua catatan waktu tersebut setiap kali data dibaca, sedangkan puasa yang masih berjalan dihitung dari `last_meal_at` sampai sekarang. Database lama yang masih memakai kolom `last_meal_time`/`fast_break_time` (`TIME`) dimigrasikan otomatis saat server start: nilainya dipindahkan ke kolom baru dengan tanggal dari `entry_date`.
 
 **meals** — satu baris per pengguna, tanggal, dan jenis makan (unik `user_id + entry_date + meal_type`): `photo_path`, `food_name`, `calories`, `protein_g`, `ai_status` (`pending`/`done`/`failed`), `ai_error`, plus kolom suntingan `edited_food_name`, `edited_calories`, `edited_protein_g` yang dibiarkan `NULL` selama belum diedit. Kolom suntingan ditambahkan otomatis saat server start (migrasi tanpa menghapus data).
 
@@ -86,7 +86,7 @@ Buka <http://localhost:3000/dashboard>. Halaman ini menampilkan:
 
 - Ringkasan keseluruhan: jumlah pengguna, aktif hari ini, total makan hari ini, dan berapa pengguna yang memenuhi target gizi.
 - Kartu per pengguna berisi identitas (email, BMI, body fat, streak) dan tab **Harian / Mingguan / Bulanan**.
-  - Harian: kalori vs batas, protein vs minimal, bar progres, makan `x/3`, langkah, olahraga, puasa (durasi + rentang tanggal/jam), progres `x/3`, serta badge "Protein tercapai/kurang", "Kalori dalam batas/melebihi", dan "Hari lengkap". "Hari lengkap" berarti deklarasi + aktivitas + protein tercapai.
+  - Harian: kalori vs batas, protein vs minimal, bar progres, makan `x/3`, langkah, olahraga, puasa (durasi berjalan/selesai + rentang tanggal/jam + target jam), progres `x/3`, serta badge "Protein tercapai/kurang", "Kalori dalam batas/melebihi", dan "Hari lengkap". "Hari lengkap" berarti deklarasi + aktivitas + protein tercapai.
   - Mingguan (7 hari) dan bulanan (30 hari): rata-rata kalori, jumlah hari protein tercapai, hari kalori melebihi batas, hari lengkap, hari tercatat, total makan, dan total langkah.
 - Setiap kartu punya tautan **Lihat detail** ke `/dashboard/:userId`.
 
@@ -96,7 +96,7 @@ Menampilkan satu peserta secara utuh:
 
 - Profil: email, tanggal lahir, usia, gender, tinggi, berat, body fat, BMI, tanggal bergabung, streak, serta target protein minimal dan kalori maksimal dengan progres hari ini.
 - Ringkasan tiga periode: hari ini, 7 hari, dan 30 hari (kalori, protein, makan, puasa, hari tercatat, hari lengkap).
-- Daftar catatan harian 30 hari terakhir (yang ada isinya, terbaru di atas): deklarasi, steps, olahraga, catatan puasa (tanggal & jam terakhir makan → buka puasa) beserta durasinya, progres `x/3` hari itu, total protein/kalori, serta tiga slot makan.
+- Daftar catatan harian 30 hari terakhir (yang ada isinya, terbaru di atas): deklarasi, steps, olahraga, catatan puasa (tanggal & jam terakhir makan → buka puasa, target jam, atau durasi berjalan), progres `x/3` hari itu, total protein/kalori, serta tiga slot makan.
 - Setiap foto makan ditampilkan sebagai thumbnail yang bisa diketuk untuk membuka ukuran penuh; hasil AI dan suntingannya ditandai (`AI` / `Suntingan`) beserta nilai asli AI bila sudah disunting.
 
 Halaman ini **tidak memiliki autentikasi**: siapa pun yang membuka URL tersebut dapat melihat data semua pengguna. Batasi akses (misalnya di balik login admin) sebelum dipakai publik.
@@ -109,7 +109,7 @@ Halaman ini **tidak memiliki autentikasi**: siapa pun yang membuka URL tersebut 
 | GET    | `/api/users/:userId`                              | Profil + BMI                                      |
 | PATCH  | `/api/users/:userId`                              | Perbarui profil                                   |
 | GET    | `/api/users/:userId/days/:date`                   | Entri, 3 slot makan, total, progres               |
-| PUT    | `/api/users/:userId/days/:date/entry`             | Simpan deklarasi + aktivitas + `lastMealAt`/`fastBreakAt` (`YYYY-MM-DDTHH:MM`, wajib berpasangan) |
+| PUT    | `/api/users/:userId/days/:date/entry`             | Simpan deklarasi + aktivitas + catatan puasa (`lastMealAt`/`fastBreakAt` `YYYY-MM-DDTHH:MM`; `lastMealAt` saja sudah memulai timer) + `fastingTargetHours` |
 | POST   | `/api/users/:userId/days/:date/meals`             | Upload foto makan (multipart `photo`, `mealType`) dan analisis AI |
 | PUT    | `/api/users/:userId/meals/:mealId`                | Simpan suntingan hasil AI (tanpa menimpa hasil AI) |
 | DELETE | `/api/users/:userId/meals/:mealId/edit`           | Kembalikan ke hasil AI (hapus suntingan)          |
@@ -148,7 +148,7 @@ Upload dibatasi 6 MB dengan tipe JPG/PNG/WEBP. Jika analisis AI gagal (kuota, ja
 ## Catatan
 
 - **API key hanya dipakai di server** (`server/ai.js`) dan dibaca dari `.env`; jangan menaruhnya di kode front-end atau commit ke git. `.env` sudah masuk `.gitignore`.
-- Estimasi kalori/protein berasal dari model AI dan bersifat perkiraan, bukan nasihat medis. Anjuran protein/ kalori juga hanya estimasi dari rumus Mifflin-St Jeor dengan asumsi aktivitas ringan.
+- Estimasi kalori/protein berasal dari model AI dan bersifat perkiraan, bukan nasihat medis. Anjuran kalori memakai BMR Mifflin-St Jeor atas berat badan ideal × faktor aktivitas (default ringan 1,375) + penyesuaian target berat, dengan protein 1 g/kg berat badan ideal; angka quick method (IBW × 20–25 kkal) ditampilkan sebagai pembanding, bukan pengganti nasihat dietitian.
 - Identitas saat ini hanya berbasis email tanpa password/verifikasi, jadi **bukan autentikasi yang aman**. Siapa pun yang tahu sebuah email bisa memuat profil itu. Untuk produksi, tambahkan verifikasi email/OTP atau login, dan batasi akses data per pengguna.
 - ID pengguna disimpan di `localStorage` dan API memakai `userId` di URL.
 - Foto disimpan di disk lokal; untuk deployment multi-instance gunakan object storage.
