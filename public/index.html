@@ -137,6 +137,17 @@
             </div>
 
             <div class="field">
+              <label for="input-tz">Zona waktu</label>
+              <select id="input-tz" name="tzOffset">
+                <option value="6">UTC+6</option>
+                <option value="7" selected>WIB (UTC+7)</option>
+                <option value="8">WITA (UTC+8)</option>
+                <option value="9">WIT (UTC+9)</option>
+              </select>
+              <p class="field-hint">Menentukan tanggal hari ini dan timer puasa.</p>
+            </div>
+
+            <div class="field">
               <label>Target berat badan</label>
               <div class="segmented segmented-3" role="radiogroup" aria-label="Target berat badan">
                 <label class="segmented-option">
@@ -310,6 +321,7 @@
                   <div><dt>Body fat</dt><dd id="stat-bodyfat">—</dd></div>
                   <div><dt>Aktivitas</dt><dd id="stat-activity">—</dd></div>
                   <div><dt>Target</dt><dd id="stat-goal">—</dd></div>
+                  <div><dt>Zona waktu</dt><dd id="stat-tz">—</dd></div>
                 </dl>
                 <div class="bmi-badge" id="bmi-badge">
                   <span>BMI</span>
@@ -455,6 +467,17 @@
               <option value="active">Tinggi (olahraga 6–7×/minggu)</option>
               <option value="very_active">Sangat aktif (kerja fisik/atlet)</option>
             </select>
+          </div>
+
+          <div class="field">
+            <label for="edit-tz">Zona waktu</label>
+            <select id="edit-tz">
+              <option value="6">UTC+6</option>
+              <option value="7">WIB (UTC+7)</option>
+              <option value="8">WITA (UTC+8)</option>
+              <option value="9">WIT (UTC+9)</option>
+            </select>
+            <p class="field-hint">Menentukan tanggal hari ini dan timer puasa.</p>
           </div>
 
           <div class="field">

@@ -15,6 +15,7 @@ const els = {
   inputWeight: $('#input-weight'),
   inputBodyFat: $('#input-bodyfat'),
   inputActivity: $('#input-activity'),
+  inputTz: $('#input-tz'),
   bmiValue: $('#bmi-value'),
   bmiCategory: $('#bmi-category'),
   onboardingError: $('#onboarding-error'),
@@ -71,6 +72,7 @@ const els = {
   statBodyFat: $('#stat-bodyfat'),
   statActivity: $('#stat-activity'),
   statGoal: $('#stat-goal'),
+  statTz: $('#stat-tz'),
   statBmi: $('#stat-bmi'),
   statBmiCategory: $('#stat-bmi-category'),
   historyList: $('#history-list'),
@@ -96,6 +98,7 @@ const els = {
   editWeight: $('#edit-weight'),
   editBodyFat: $('#edit-bodyfat'),
   editActivity: $('#edit-activity'),
+  editTz: $('#edit-tz'),
   editError: $('#edit-error'),
 
   toast: $('#toast'),
@@ -112,10 +115,20 @@ const ACTIVITY_LABEL = {
 };
 const GOAL_LABEL = { lose: 'Turun', maintain: 'Jaga', gain: 'Naik' };
 const FASTING_TARGETS = [12, 14, 16, 18];
+const TZ_LABELS = { 6: 'UTC+6', 7: 'WIB (UTC+7)', 8: 'WITA (UTC+8)', 9: 'WIT (UTC+9)' };
 const MEAL_LABELS = { breakfast: 'Sarapan', lunch: 'Siang', dinner: 'Malam' };
 const MEAL_ORDER = ['breakfast', 'lunch', 'dinner'];
 const MAX_PHOTO_BYTES = 6 * 1024 * 1024;
 const DAY_TOTAL = 3;
+
+/** Offset zona waktu browser bila termasuk pilihan yang didukung, selain itu WIB. */
+function browserTzOffset() {
+  const offset = -new Date().getTimezoneOffset() / 60;
+  return Number.isInteger(offset) && TZ_LABELS[offset] ? offset : 7;
+}
+
+// Offset zona waktu pengguna (6-9). Dipakai untuk tanggal "hari ini" dan timer puasa.
+let userTzOffset = browserTzOffset();
 
 const state = {
   user: null,
@@ -131,7 +144,7 @@ const state = {
 /* ------------------------------------------------------------------ utils */
 
 function todayISO() {
-  return toISO(new Date());
+  return new Date(Date.now() + userTzOffset * 3600000).toISOString().slice(0, 10);
 }
 
 function toISO(date) {
@@ -167,7 +180,10 @@ function formatShortDate(isoDate) {
 }
 
 function formatTime(date = new Date()) {
-  return new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit' }).format(date);
+  const wall = new Date(date.getTime() + userTzOffset * 3600000);
+  const h = String(wall.getUTCHours()).padStart(2, '0');
+  const m = String(wall.getUTCMinutes()).padStart(2, '0');
+  return `${h}.${m}`;
 }
 
 function formatBirthDate(isoDate) {
@@ -209,10 +225,13 @@ function clockText(ms) {
   return [h, m, s].map((part) => String(part).padStart(2, '0')).join(':');
 }
 
+/** Waktu dinding (input datetime-local) → instant, memakai zona waktu pengguna. */
 function parseLocalDateTime(value) {
-  if (!value) return null;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(value || '');
+  if (!match) return null;
+  const [, y, mo, d, h, mi] = match.map(Number);
+  const instant = Date.UTC(y, mo - 1, d, h, mi) - userTzOffset * 3600000;
+  return Number.isNaN(instant) ? null : new Date(instant);
 }
 
 /** Timer puasa: berjalan real-time dari waktu makan terakhir sampai buka puasa. */
@@ -350,6 +369,7 @@ function userPath(suffix = '') {
 
 async function boot() {
   setupDateInputs();
+  els.inputTz.value = String(userTzOffset);
   const savedId = localStorage.getItem(STORAGE_KEY);
   if (!savedId) {
     showOnboarding();
@@ -359,6 +379,8 @@ async function boot() {
   try {
     const { user } = await api(`/api/users/${savedId}`);
     state.user = user;
+    userTzOffset = user.tzOffset ?? browserTzOffset();
+    setupDateInputs();
     state.selectedDate = todayISO();
     await showDashboard();
   } catch {
@@ -409,6 +431,7 @@ function renderProfile() {
   els.statBodyFat.textContent = user.bodyFat ? `${user.bodyFat}%` : '—';
   els.statActivity.textContent = ACTIVITY_LABEL[user.activityLevel] ?? '—';
   els.statGoal.textContent = GOAL_LABEL[user.weightGoal] ?? '—';
+  els.statTz.textContent = user.tzLabel ?? TZ_LABELS[user.tzOffset] ?? '—';
   els.statBmi.textContent = bmi ? bmi.value.toFixed(1) : '—';
   els.statBmiCategory.textContent = bmi ? bmi.category : '—';
   els.heroName.textContent = user.name.trim().split(/\s+/)[0];
@@ -891,6 +914,7 @@ $('#btn-edit-profile').addEventListener('click', () => {
   els.editWeight.value = user.weightKg;
   els.editBodyFat.value = user.bodyFat ?? '';
   els.editActivity.value = user.activityLevel ?? 'light';
+  els.editTz.value = String(user.tzOffset ?? 7);
   els.formEditProfile.querySelector(`input[name="editGender"][value="${user.gender}"]`).checked =
     true;
   els.formEditProfile.querySelector(
@@ -912,6 +936,7 @@ els.formEditProfile.addEventListener('submit', async (event) => {
     bodyFat: els.editBodyFat.value === '' ? null : Number(els.editBodyFat.value),
     activityLevel: els.editActivity.value,
     weightGoal: els.formEditProfile.querySelector('input[name="editWeightGoal"]:checked')?.value,
+    tzOffset: Number(els.editTz.value),
   };
 
   const button = $('#btn-save-edit');
@@ -923,10 +948,14 @@ els.formEditProfile.addEventListener('submit', async (event) => {
       body: JSON.stringify(payload),
     });
     state.user = user;
+    userTzOffset = user.tzOffset ?? userTzOffset;
     renderProfile();
     renderRecommendation();
     closeModal('modal-profile');
-    await loadOverview();
+    setupDateInputs();
+    state.selectedDate = todayISO();
+    els.todayLabel.textContent = formatLongDate(todayISO());
+    await refreshData();
     toast('Profil tersimpan.');
   } catch (error) {
     showError(els.editError, error.message);
@@ -941,8 +970,11 @@ $('#btn-switch-user').addEventListener('click', () => {
   state.user = null;
   state.day = null;
   state.history = [];
+  userTzOffset = browserTzOffset();
   state.selectedDate = todayISO();
   els.formProfile.reset();
+  els.inputTz.value = String(userTzOffset);
+  setupDateInputs();
   els.bmiValue.textContent = '—';
   els.bmiCategory.textContent = '—';
   showOnboarding();
@@ -964,6 +996,7 @@ els.formProfile.addEventListener('submit', async (event) => {
     bodyFat: els.inputBodyFat.value === '' ? null : Number(els.inputBodyFat.value),
     activityLevel: els.inputActivity.value,
     weightGoal: els.formProfile.querySelector('input[name="weightGoal"]:checked')?.value,
+    tzOffset: Number(els.inputTz.value),
   };
 
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.email)) {
@@ -987,9 +1020,12 @@ els.formProfile.addEventListener('submit', async (event) => {
       body: JSON.stringify(payload),
     });
     state.user = user;
+    userTzOffset = user.tzOffset ?? browserTzOffset();
+    setupDateInputs();
     state.selectedDate = todayISO();
     localStorage.setItem(STORAGE_KEY, user.id);
     els.formProfile.reset();
+    els.inputTz.value = String(userTzOffset);
     await showDashboard();
     toast(existed ? 'Email dikenali — data lama dimuat.' : `Halo, ${user.name.split(' ')[0]}!`);
   } catch (error) {
@@ -1010,16 +1046,16 @@ els.inputWeight.addEventListener('input', updateBmiPreview);
 
 function setupDateInputs() {
   const today = todayISO();
-  const earliest = `${new Date().getFullYear() - 110}-01-01`;
+  const nowWall = new Date(Date.now() + userTzOffset * 3600000);
+  const earliest = `${nowWall.getUTCFullYear() - 110}-01-01`;
   [els.inputBirthDate, els.editBirthDate].forEach((input) => {
     input.max = today;
     input.min = earliest;
   });
 
   // Catatan puasa berisi waktu yang sudah terjadi, bukan rencana.
-  const now = new Date();
-  const nowLocal = `${today}T${String(now.getHours()).padStart(2, '0')}:${String(
-    now.getMinutes(),
+  const nowLocal = `${today}T${String(nowWall.getUTCHours()).padStart(2, '0')}:${String(
+    nowWall.getUTCMinutes(),
   ).padStart(2, '0')}`;
   [els.inputLastMeal, els.inputFastBreak].forEach((input) => {
     input.max = nowLocal;

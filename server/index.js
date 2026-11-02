@@ -65,10 +65,40 @@ function isValidDate(value) {
   );
 }
 
-function todayString() {
-  const now = new Date();
-  const offset = now.getTimezoneOffset() * 60000;
-  return new Date(now.getTime() - offset).toISOString().slice(0, 10);
+/**
+ * Zona waktu tetap yang bisa dipilih pengguna. Semua perhitungan "hari ini"
+ * dan timer puasa memakai offset ini, bukan zona waktu server/browser.
+ */
+const TIMEZONE_OFFSETS = new Map([
+  [6, 'UTC+6'],
+  [7, 'WIB (UTC+7)'],
+  [8, 'WITA (UTC+8)'],
+  [9, 'WIT (UTC+9)'],
+]);
+const DEFAULT_TZ_OFFSET = 7;
+
+function tzOffsetOf(row) {
+  const offset = Number(row?.tz_offset ?? row?.tzOffset);
+  return TIMEZONE_OFFSETS.has(offset) ? offset : DEFAULT_TZ_OFFSET;
+}
+
+/** Tanggal YYYY-MM-DD menurut offset zona waktu pengguna. */
+function todayString(offsetHours = -new Date().getTimezoneOffset() / 60) {
+  return new Date(Date.now() + offsetHours * 3600000).toISOString().slice(0, 10);
+}
+
+/** Dinding jam (tanpa zona waktu) → milidetik epoch seolah UTC. */
+function wallClockMs(value) {
+  const date = localDate(value);
+  if (!date) return null;
+  return Date.UTC(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+    date.getHours(),
+    date.getMinutes(),
+    date.getSeconds(),
+  );
 }
 
 /** Mengambil bagian tanggal (YYYY-MM-DD) dari nilai DATE MySQL. */
@@ -225,6 +255,8 @@ function shapeUser(row) {
     bodyFat: row.body_fat === null || row.body_fat === undefined ? null : Number(row.body_fat),
     activityLevel: row.activity_level ?? 'light',
     weightGoal: row.weight_goal ?? 'maintain',
+    tzOffset: tzOffsetOf(row),
+    tzLabel: TIMEZONE_OFFSETS.get(tzOffsetOf(row)),
   };
   return {
     ...profile,
@@ -323,11 +355,21 @@ function parseProfile(body, { withEmail = false, current = null } = {}) {
     throw new HttpError(400, 'Nama harus 2-100 karakter.');
   }
 
+  const tzOffset =
+    body.tzOffset === undefined || body.tzOffset === null || body.tzOffset === ''
+      ? current
+        ? tzOffsetOf(current)
+        : DEFAULT_TZ_OFFSET
+      : Number(body.tzOffset);
+  if (!TIMEZONE_OFFSETS.has(tzOffset)) {
+    throw new HttpError(400, 'Zona waktu harus UTC+6, UTC+7, UTC+8, atau UTC+9.');
+  }
+
   const birthDate = String(body.birthDate ?? '').trim().slice(0, 10);
   if (!isValidDate(birthDate)) {
     throw new HttpError(400, 'Tanggal lahir wajib diisi dengan format YYYY-MM-DD.');
   }
-  if (birthDate > todayString()) {
+  if (birthDate > todayString(tzOffset)) {
     throw new HttpError(400, 'Tanggal lahir tidak boleh tanggal yang akan datang.');
   }
   const age = ageFromBirthDate(birthDate);
@@ -359,6 +401,7 @@ function parseProfile(body, { withEmail = false, current = null } = {}) {
     bodyFat,
     activityLevel,
     weightGoal,
+    tzOffset,
   };
   if (withEmail) profile.email = parseEmail(body.email);
   return profile;
@@ -405,8 +448,8 @@ app.post('/api/users', async (req, res) => {
   try {
     const [result] = await pool.query(
       `INSERT INTO users
-         (name, email, birth_date, age, gender, height_cm, weight_kg, body_fat, activity_level, weight_goal)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (name, email, birth_date, age, gender, height_cm, weight_kg, body_fat, activity_level, weight_goal, tz_offset)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         profile.name,
         profile.email,
@@ -418,6 +461,7 @@ app.post('/api/users', async (req, res) => {
         profile.bodyFat,
         profile.activityLevel,
         profile.weightGoal,
+        profile.tzOffset,
       ],
     );
     const user = await findUser(result.insertId);
@@ -441,7 +485,7 @@ app.patch('/api/users/:userId', async (req, res) => {
   await pool.query(
     `UPDATE users
         SET name = ?, birth_date = ?, age = ?, gender = ?, height_cm = ?, weight_kg = ?, body_fat = ?,
-            activity_level = ?, weight_goal = ?
+            activity_level = ?, weight_goal = ?, tz_offset = ?
       WHERE id = ?`,
     [
       profile.name,
@@ -453,6 +497,7 @@ app.patch('/api/users/:userId', async (req, res) => {
       profile.bodyFat,
       profile.activityLevel,
       profile.weightGoal,
+      profile.tzOffset,
       req.params.userId,
     ],
   );
@@ -480,11 +525,11 @@ function entryShape(row) {
 }
 
 /** Menit puasa yang masih berjalan (belum ada waktu buka puasa). */
-function openFastingMinutes(entryData) {
+function openFastingMinutes(entryData, tzOffset = DEFAULT_TZ_OFFSET) {
   if (!entryData?.lastMealAt || entryData.fastBreakAt) return null;
-  const start = localDate(entryData.lastMealAt);
-  if (!start) return null;
-  return Math.max(0, Math.round((Date.now() - start.getTime()) / 60000));
+  const start = wallClockMs(entryData.lastMealAt);
+  if (start === null) return null;
+  return Math.max(0, Math.round((Date.now() + tzOffset * 3600000 - start) / 60000));
 }
 
 /** Entri dianggap berisi bila salah satu bagiannya diisi, termasuk catatan puasa. */
@@ -524,8 +569,11 @@ async function buildDay(userRow, date) {
     [user.id, date],
   );
 
+  const today = todayString(user.tzOffset);
   const entryData = entryShape(entry);
-  if (date === todayString()) entryData.fastingElapsedMinutes = openFastingMinutes(entryData);
+  if (date === today) {
+    entryData.fastingElapsedMinutes = openFastingMinutes(entryData, user.tzOffset);
+  }
   const meals = { breakfast: null, lunch: null, dinner: null };
   for (const row of mealRows) {
     meals[row.meal_type] = shapeMeal(row);
@@ -541,7 +589,7 @@ async function buildDay(userRow, date) {
 
   return {
     date,
-    today: todayString(),
+    today,
     aiReady: aiConfigured(),
     entry: entryData,
     meals,
@@ -559,9 +607,12 @@ app.get('/api/users/:userId/days/:date', async (req, res) => {
 
 app.put('/api/users/:userId/days/:date/entry', async (req, res) => {
   const user = await findUser(req.params.userId);
+  const userTz = tzOffsetOf(user);
   const { date } = req.params;
   if (!isValidDate(date)) throw new HttpError(400, 'Format tanggal harus YYYY-MM-DD.');
-  if (date > todayString()) throw new HttpError(400, 'Belum bisa mengisi tanggal yang akan datang.');
+  if (date > todayString(userTz)) {
+    throw new HttpError(400, 'Belum bisa mengisi tanggal yang akan datang.');
+  }
 
   const declaration = String(req.body.declaration ?? '').trim().slice(0, 500);
   const steps = optionalInt(req.body.steps, 'Steps', 200000);
@@ -586,12 +637,13 @@ app.put('/api/users/:userId/days/:date/entry', async (req, res) => {
       throw new HttpError(400, 'Rentang puasa maksimal 7 hari.');
     }
   }
-  const latest = Date.now() + 5 * 60000;
+  // Bandingkan dinding jam pengguna dengan "sekarang" di zona waktunya.
+  const latest = Date.now() + userTz * 3600000 + 5 * 60000;
   for (const [value, label] of [
     [lastMealAt, 'Waktu makan terakhir'],
     [fastBreakAt, 'Waktu buka puasa'],
   ]) {
-    if (value && localDate(value).getTime() > latest) {
+    if (value && wallClockMs(value) > latest) {
       throw new HttpError(400, `${label} belum terjadi.`);
     }
   }
@@ -648,7 +700,9 @@ app.post('/api/users/:userId/days/:date/meals', upload.single('photo'), async (r
 
     if (!isValidDate(date)) throw new HttpError(400, 'Format tanggal harus YYYY-MM-DD.');
     if (!MEAL_TYPES.includes(mealType)) throw new HttpError(400, 'Jenis makan tidak valid.');
-    if (date > todayString()) throw new HttpError(400, 'Belum bisa mengisi tanggal yang akan datang.');
+    if (date > todayString(tzOffsetOf(user))) {
+      throw new HttpError(400, 'Belum bisa mengisi tanggal yang akan datang.');
+    }
     if (!req.file) throw new HttpError(400, 'Foto makan wajib diunggah.');
 
     const [existing] = await pool.query(
@@ -768,7 +822,7 @@ app.get('/api/users/:userId/overview', async (req, res) => {
 
   const [entryRows] = await pool.query(
     'SELECT * FROM daily_entries WHERE user_id = ? AND entry_date >= ?',
-    [user.id, addDaysISO(todayString(), -60)],
+    [user.id, addDaysISO(todayString(user.tzOffset), -60)],
   );
   const entryByDate = new Map(entryRows.map((row) => [row.entry_date, row]));
 
@@ -784,7 +838,7 @@ app.get('/api/users/:userId/overview', async (req, res) => {
   );
 
   const history = [];
-  const cursor = new Date(`${todayString()}T00:00:00`);
+  const cursor = new Date(`${todayString(user.tzOffset)}T00:00:00`);
   for (let i = days - 1; i >= 0; i -= 1) {
     const d = new Date(cursor);
     d.setDate(cursor.getDate() - i);
@@ -894,20 +948,22 @@ function summarizePeriod(user, entryMap, mealMap, startDate, periodDays) {
 }
 
 app.get('/api/dashboard', async (_req, res) => {
-  const today = todayString();
-  const start30 = addDaysISO(today, -29);
+  // Zona waktu tiap pengguna bisa berbeda, jadi ambil rentang yang menutup semuanya.
+  const serverToday = todayString();
+  const queryStart = addDaysISO(serverToday, -32);
+  const queryEnd = addDaysISO(serverToday, 2);
 
   const [userRows] = await pool.query('SELECT * FROM users ORDER BY id');
   const users = userRows.map(shapeUser);
 
   const [entryRows] = await pool.query(
     'SELECT * FROM daily_entries WHERE entry_date BETWEEN ? AND ?',
-    [start30, today],
+    [queryStart, queryEnd],
   );
   const [mealRows] = await pool.query(
     `SELECT user_id, entry_date, calories, protein_g, edited_calories, edited_protein_g
        FROM meals WHERE entry_date BETWEEN ? AND ?`,
-    [start30, today],
+    [queryStart, queryEnd],
   );
 
   const entryMap = new Map();
@@ -921,6 +977,8 @@ app.get('/api/dashboard', async (_req, res) => {
   }
 
   const result = users.map((user) => {
+    const today = todayString(user.tzOffset);
+    const start30 = addDaysISO(today, -29);
     const daily = summarizePeriod(user, entryMap, mealMap, today, 1);
     const weekly = summarizePeriod(user, entryMap, mealMap, addDaysISO(today, -6), 7);
     const monthly = summarizePeriod(user, entryMap, mealMap, start30, 30);
@@ -943,7 +1001,7 @@ app.get('/api/dashboard', async (_req, res) => {
       lastMealAt: todayEntryData.lastMealAt,
       fastBreakAt: todayEntryData.fastBreakAt,
       fastingMinutes: todayEntryData.fastingMinutes,
-      fastingElapsedMinutes: openFastingMinutes(todayEntryData),
+      fastingElapsedMinutes: openFastingMinutes(todayEntryData, user.tzOffset),
       fastingTargetHours: todayEntryData.fastingTargetHours,
       proteinMet: daily.proteinG >= user.recommendation.proteinMinG && daily.proteinG > 0,
       calorieOver: daily.calories > user.recommendation.calorieMax,
@@ -984,7 +1042,7 @@ app.get('/api/dashboard', async (_req, res) => {
     caloriesToday: result.reduce((sum, u) => sum + u.daily.calories, 0),
   };
 
-  res.json({ today, summary, users: result });
+  res.json({ today: serverToday, summary, users: result });
 });
 
 /* ------------------------------------------------------- dashboard detail */
@@ -992,7 +1050,7 @@ app.get('/api/dashboard', async (_req, res) => {
 app.get('/api/dashboard/users/:userId', async (req, res) => {
   const userRow = await findUser(req.params.userId);
   const user = shapeUser(userRow);
-  const today = todayString();
+  const today = todayString(user.tzOffset);
   const start = addDaysISO(today, -29);
 
   const [entryRows] = await pool.query(
@@ -1025,7 +1083,9 @@ app.get('/api/dashboard/users/:userId', async (req, res) => {
     const entry = entryMap.get(`${user.id}|${date}`);
     const dayMeals = mealMap.get(`${user.id}|${date}`) ?? [];
     const entryData = entryShape(entry);
-    if (date === today) entryData.fastingElapsedMinutes = openFastingMinutes(entryData);
+    if (date === today) {
+      entryData.fastingElapsedMinutes = openFastingMinutes(entryData, user.tzOffset);
+    }
 
     const totals = {
       calories: Math.round(

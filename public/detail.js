@@ -111,6 +111,7 @@ function profileHtml() {
         <div><dt>BMR</dt><dd>${fmt(user.recommendation.bmr)} kkal</dd></div>
         <div><dt>Aktivitas</dt><dd>${esc(user.recommendation.activityLabel ?? '—')}</dd></div>
         <div><dt>Target</dt><dd>${esc(user.recommendation.weightGoalLabel ?? '—')}</dd></div>
+        <div><dt>Zona waktu</dt><dd>${esc(user.tzLabel ?? `UTC+${user.tzOffset}`)}</dd></div>
         <div><dt>Gabung</dt><dd>${esc(formatBirthDate((user.createdAt ?? '').slice(0, 10)) || '—')}</dd></div>
       </dl>
 

@@ -5,11 +5,11 @@ Jurnal kebugaran harian: tulis deklarasi, catat aktivitas, dan unggah foto makan
 ## Fitur
 
 - **Identifikasi email** — email unik menjadi identitas. Memasukkan email yang sudah terdaftar akan memuat profil dan seluruh data sebelumnya (tanpa membuat pengguna baru); data yang diketik ulang tidak menimpa profil lama.
-- **Onboarding profil** — email, nama, **tanggal lahir (hari/bulan/tahun)**, gender, tinggi, berat, **body fat opsional**, **tingkat aktivitas harian**, dan **target berat badan (turun/jaga/naik)**; usia, BMI, berat badan ideal, dan anjuran kalori dihitung otomatis.
+- **Onboarding profil** — email, nama, **tanggal lahir (hari/bulan/tahun)**, gender, tinggi, berat, **body fat opsional**, **tingkat aktivitas harian**, **target berat badan (turun/jaga/naik)**, dan **zona waktu (UTC+6, UTC+7/WIB, UTC+8/WITA, UTC+9/WIT)**; usia, BMI, berat badan ideal, dan anjuran kalori dihitung otomatis.
 - **Anjuran harian** — **berat badan ideal (IBW = 22 × tinggi(m)²)**, **BMR Mifflin-St Jeor memakai IBW**, lalu **TDEE = BMR × faktor aktivitas** dan penyesuaian target berat (−500 kkal turun / 0 jaga / +300 kkal naik, tidak pernah di bawah BMR). **Protein minimal = 1 g × IBW**. Kartu anjuran menampilkan rincian BMR → TDEE → target, ditambah rentang **quick method (IBW × 20–25 kkal)** sebagai pembanding.
 - **Deklarasi harian** — satu komitmen per hari.
 - **Aktivitas harian** — steps dan jenis olahraga.
-- **Catatan & timer puasa** — mencatat **tanggal + jam terakhir makan** dan (opsional) **tanggal + jam buka puasa**, bukan rencana ke depan. Begitu waktu makan terakhir disimpan tanpa buka puasa, timer berjalan real-time dari waktu tersebut; target **12/14/16/18 jam** bisa dipilih per hari, lengkap dengan sisa waktu, perkiraan jam buka, dan progres target. Durasi puasa yang sudah selesai dihitung otomatis, termasuk rentang yang melewati tengah malam.
+- **Catatan & timer puasa** — mencatat **tanggal + jam terakhir makan** dan (opsional) **tanggal + jam buka puasa**, bukan rencana ke depan. Begitu waktu makan terakhir disimpan tanpa buka puasa, timer berjalan real-time dari waktu tersebut; target **12/14/16/18 jam** bisa dipilih per hari, lengkap dengan sisa waktu, perkiraan jam buka, dan progres target. Timer dan tanggal "hari ini" memakai **zona waktu profil** (UTC+6 sampai UTC+9), bukan zona waktu server atau browser. Durasi puasa yang sudah selesai dihitung otomatis, termasuk rentang yang melewati tengah malam.
 - **Pola makan** — slot Sarapan, Siang, Malam. Setiap slot menerima satu foto; foto langsung dikirim ke **OpenAI vision** untuk estimasi kalori, protein, dan deskripsi singkat makanan.
 - **Edit hasil AI** — deskripsi, kalori, dan protein bisa disunting. Hasil asli AI tetap disimpan: tiap kartu punya tombol **AI / Suntingan** untuk membandingkan, dan suntingan bisa dikembalikan ke hasil AI kapan saja.
 - **Total harian** — total kalori dan protein (memakai suntingan bila ada) dari ketiga foto.
@@ -72,7 +72,7 @@ Jurnal kebugaran harian: tulis deklarasi, catat aktivitas, dan unggah foto makan
 
 ## Skema database
 
-**users** — profil pengguna (`id`, `name`, `email` unik, `birth_date`, `age`, `gender`, `height_cm`, `weight_kg`, `body_fat` opsional, `activity_level` (`sedentary`/`light`/`moderate`/`active`/`very_active`, default `light`), `weight_goal` (`lose`/`maintain`/`gain`, default `maintain`), timestamps). `birth_date` adalah sumber kebenaran usia; kolom `age` tetap diisi sebagai cache untuk pengguna lama yang belum punya tanggal lahir. Kolom email, index unik, body fat, birth date, activity level, dan weight goal ditambahkan otomatis untuk database lama.
+**users** — profil pengguna (`id`, `name`, `email` unik, `birth_date`, `age`, `gender`, `height_cm`, `weight_kg`, `body_fat` opsional, `activity_level` (`sedentary`/`light`/`moderate`/`active`/`very_active`, default `light`), `weight_goal` (`lose`/`maintain`/`gain`, default `maintain`), `tz_offset` (6–9, default 7), timestamps). `birth_date` adalah sumber kebenaran usia; kolom `age` tetap diisi sebagai cache untuk pengguna lama yang belum punya tanggal lahir. Kolom email, index unik, body fat, birth date, activity level, weight goal, dan tz offset ditambahkan otomatis untuk database lama.
 
 **daily_entries** — satu baris per pengguna per tanggal (unik `user_id + entry_date`): `declaration_text`, `steps`, `sport`, `last_meal_at`, `fast_break_at` (keduanya `DATETIME`, jadi tanggal ikut tersimpan), dan `fasting_target_hours` (default 16). Durasi puasa selesai tidak disimpan; dihitung dari dua catatan waktu tersebut setiap kali data dibaca, sedangkan puasa yang masih berjalan dihitung dari `last_meal_at` sampai sekarang. Database lama yang masih memakai kolom `last_meal_time`/`fast_break_time` (`TIME`) dimigrasikan otomatis saat server start: nilainya dipindahkan ke kolom baru dengan tanggal dari `entry_date`.
 
@@ -105,9 +105,9 @@ Halaman ini **tidak memiliki autentikasi**: siapa pun yang membuka URL tersebut 
 
 | Method | Endpoint                                          | Keterangan                                        |
 | ------ | ------------------------------------------------- | ------------------------------------------------- |
-| POST   | `/api/users`                                      | Buat profil (butuh `birthDate` `YYYY-MM-DD`), atau muat profil lama bila `email` sudah ada (`existed: true`). Respons menyertakan `birthDate`, `age` hasil hitung, dan `recommendation` |
-| GET    | `/api/users/:userId`                              | Profil + BMI                                      |
-| PATCH  | `/api/users/:userId`                              | Perbarui profil                                   |
+| POST   | `/api/users`                                      | Buat profil (butuh `birthDate` `YYYY-MM-DD`; `tzOffset` 6–9, default 7), atau muat profil lama bila `email` sudah ada (`existed: true`). Respons menyertakan `birthDate`, `age` hasil hitung, `tzOffset`/`tzLabel`, dan `recommendation` |
+| GET    | `/api/users/:userId`                              | Profil + BMI + zona waktu                         |
+| PATCH  | `/api/users/:userId`                              | Perbarui profil (termasuk `tzOffset`)             |
 | GET    | `/api/users/:userId/days/:date`                   | Entri, 3 slot makan, total, progres               |
 | PUT    | `/api/users/:userId/days/:date/entry`             | Simpan deklarasi + aktivitas + catatan puasa (`lastMealAt`/`fastBreakAt` `YYYY-MM-DDTHH:MM`; `lastMealAt` saja sudah memulai timer) + `fastingTargetHours` |
 | POST   | `/api/users/:userId/days/:date/meals`             | Upload foto makan (multipart `photo`, `mealType`) dan analisis AI |

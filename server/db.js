@@ -116,6 +116,7 @@ export async function ensureSchema() {
     ['birth_date', 'DATE NULL'],
     ['activity_level', "VARCHAR(20) NOT NULL DEFAULT 'light'"],
     ['weight_goal', "VARCHAR(20) NOT NULL DEFAULT 'maintain'"],
+    ['tz_offset', 'TINYINT UNSIGNED NOT NULL DEFAULT 7'],
   ]);
   await ensureIndex('users', 'uq_users_email', 'UNIQUE KEY uq_users_email (email)');
 }
