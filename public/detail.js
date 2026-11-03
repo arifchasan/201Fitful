@@ -329,7 +329,7 @@ async function boot() {
   }
 
   try {
-    const response = await fetch(`/api/dashboard/users/${match[1]}`);
+    const response = await fetch(`/api/dashboard/users/${match[1]}`, { cache: 'no-store' });
     if (!response.ok) {
       const payload = await response.json().catch(() => null);
       throw new Error(payload?.error || 'Gagal memuat detail peserta.');

@@ -120,7 +120,7 @@ Halaman ini **tidak memiliki autentikasi**: siapa pun yang membuka URL tersebut 
 | GET    | `/api/dashboard`                                  | Ringkasan semua pengguna (harian, mingguan, bulanan) |
 | GET    | `/api/dashboard/users/:userId`                    | Detail satu peserta: profil, ringkasan, dan catatan 30 hari beserta foto |
 
-`mealType` menerima `breakfast`, `lunch`, `dinner`, atau `snack`; `mealTime` opsional (default jam sekarang untuk hari ini). Upload dibatasi 6 MB dengan tipe JPG/PNG/WEBP. Jika analisis AI gagal (kuota, jaringan, atau key salah), foto tetap tersimpan dan respons berisi `aiStatus: "failed"` beserta pesan error singkat.
+`mealType` menerima `breakfast`, `lunch`, `dinner`, atau `snack`; `mealTime` opsional (default jam sekarang untuk hari ini). Upload dibatasi 6 MB dengan tipe JPG/PNG/WEBP. Foto dari kamera/galeri otomatis diperkecil di browser (sisi terpanjang 1280 px, JPEG ±0,9 MB) sebelum dikirim, dan kegagalan unggah ditampilkan sebagai alert berisi alasannya (format, ukuran, atau koneksi). Jika analisis AI gagal (kuota, jaringan, atau key salah), foto tetap tersimpan dan respons berisi `aiStatus: "failed"` beserta pesan error singkat.
 
 ## Struktur folder
 

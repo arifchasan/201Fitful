@@ -87,6 +87,8 @@ const els = {
   formAddMeal: $('#form-add-meal'),
   newMealTime: $('#new-meal-time'),
   newMealPhoto: $('#new-meal-photo'),
+  newMealPhotoInfo: $('#new-meal-photo-info'),
+  newMealPreview: $('#new-meal-preview'),
   newMealError: $('#new-meal-error'),
   btnSaveNewMeal: $('#btn-save-new-meal'),
 
@@ -136,6 +138,9 @@ const MEAL_LABELS = {
   snack: 'Camilan',
 };
 const MAX_PHOTO_BYTES = 6 * 1024 * 1024;
+const PHOTO_MAX_EDGE = 1280;
+const PHOTO_QUALITY = 0.72;
+const PHOTO_TARGET_BYTES = 900 * 1024;
 const DAY_TOTAL = 3;
 
 /** Offset zona waktu browser bila termasuk pilihan yang didukung, selain itu WIB. */
@@ -417,7 +422,7 @@ function showError(el, message) {
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(path, options);
+  const response = await fetch(path, { cache: 'no-store', ...options });
   const isJson = (response.headers.get('content-type') || '').includes('application/json');
   const payload = isJson ? await response.json() : null;
   if (!response.ok) {
@@ -557,17 +562,35 @@ function renderRecommendation() {
   const rec = state.user?.recommendation;
   if (!rec) return;
   const totals = state.day?.totals ?? { calories: 0, proteinG: 0 };
-  const n = (value) => Number(value).toLocaleString('id-ID');
+  const toNumber = (value) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+  const n = (value) => {
+    const parsed = toNumber(value);
+    return parsed === null ? '—' : parsed.toLocaleString('id-ID');
+  };
+  const range = (min, max, unit = '') => {
+    const low = toNumber(min);
+    const high = toNumber(max);
+    return low === null || high === null ? '—' : `${n(low)}–${n(high)}${unit}`;
+  };
 
-  els.recProteinTarget.textContent = `${rec.proteinMinG}–${rec.proteinMaxG} g`;
-  els.recProteinNow.textContent = `${totals.proteinG} g · minimum ${rec.proteinMinG} g`;
-  els.recProteinBar.style.width = `${Math.min(
-    100,
-    Math.round((totals.proteinG / rec.proteinMinG) * 100),
-  )}%`;
+  const proteinMin = toNumber(rec.proteinMinG);
+  const calorieMax = toNumber(rec.calorieMax);
 
-  const caloriePercent = Math.round((totals.calories / rec.calorieMax) * 100);
-  els.recCalorieTarget.textContent = `${n(rec.calorieMin)}–${n(rec.calorieMax)} kkal`;
+  els.recProteinTarget.textContent = range(rec.proteinMinG, rec.proteinMaxG, ' g');
+  els.recProteinNow.textContent =
+    proteinMin === null
+      ? `${n(totals.proteinG)} g`
+      : `${n(totals.proteinG)} g · minimum ${n(proteinMin)} g`;
+  els.recProteinBar.style.width =
+    proteinMin && proteinMin > 0
+      ? `${Math.min(100, Math.round((totals.proteinG / proteinMin) * 100))}%`
+      : '0%';
+
+  const caloriePercent = calorieMax ? Math.round((totals.calories / calorieMax) * 100) : 0;
+  els.recCalorieTarget.textContent = range(rec.calorieMin, rec.calorieMax, ' kkal');
   els.recCalorieNow.textContent = `${totals.calories.toLocaleString('id-ID')} kkal`;
   els.recCalorieBar.style.width = `${Math.min(100, caloriePercent)}%`;
   els.recCalorieBar.classList.toggle('is-over', caloriePercent > 100);
@@ -717,8 +740,113 @@ function defaultMealType(time) {
   return 'snack';
 }
 
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '—';
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+function loadImageFile(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('File foto tidak bisa dibaca. Coba ambil ulang dengan kamera.'));
+    };
+    image.src = url;
+  });
+}
+
+function canvasToBlob(canvas, quality) {
+  return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+}
+
+/** Foto kamera/galeri diperkecil otomatis: sisi terpanjang 1280 px, JPEG ±0,9 MB. */
+async function compressPhoto(file) {
+  const image = await loadImageFile(file);
+  const sourceWidth = image.naturalWidth || image.width;
+  const sourceHeight = image.naturalHeight || image.height;
+  if (!sourceWidth || !sourceHeight) throw new Error('Ukuran foto tidak terbaca. Coba foto lain.');
+
+  const scale = Math.min(1, PHOTO_MAX_EDGE / Math.max(sourceWidth, sourceHeight));
+  const width = Math.max(1, Math.round(sourceWidth * scale));
+  const height = Math.max(1, Math.round(sourceHeight * scale));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Browser ini tidak bisa memperkecil foto.');
+  context.drawImage(image, 0, 0, width, height);
+
+  let quality = PHOTO_QUALITY;
+  let blob = await canvasToBlob(canvas, quality);
+  while (blob && blob.size > PHOTO_TARGET_BYTES && quality > 0.4) {
+    quality -= 0.1;
+    blob = await canvasToBlob(canvas, quality);
+  }
+  if (!blob) throw new Error('Foto gagal dikompres. Coba lagi atau pilih foto lain.');
+
+  const base = (file.name || 'foto').replace(/\.[^.]+$/, '') || 'foto';
+  const compressed = new File([blob], `${base}.jpg`, { type: 'image/jpeg' });
+  return { file: compressed.size < file.size ? compressed : file, width, height };
+}
+
+function resetNewMealPhoto() {
+  state.newMealFile = null;
+  if (state.newMealPreviewUrl) {
+    URL.revokeObjectURL(state.newMealPreviewUrl);
+    state.newMealPreviewUrl = null;
+  }
+  els.newMealPreview.hidden = true;
+  els.newMealPreview.removeAttribute('src');
+  els.newMealPhotoInfo.hidden = true;
+  els.newMealPhotoInfo.textContent = '';
+}
+
+els.newMealPhoto.addEventListener('change', async () => {
+  const file = els.newMealPhoto.files?.[0] ?? null;
+  resetNewMealPhoto();
+  showError(els.newMealError, '');
+  if (!file) return;
+
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+    const message = 'Format foto harus JPG, PNG, atau WEBP.';
+    els.newMealPhoto.value = '';
+    showError(els.newMealError, message);
+    window.alert(`Foto tidak bisa dipakai: ${message}`);
+    return;
+  }
+
+  els.newMealPhotoInfo.hidden = false;
+  els.newMealPhotoInfo.textContent = `Memperkecil foto… (${formatBytes(file.size)})`;
+  els.btnSaveNewMeal.disabled = true;
+  try {
+    const result = await compressPhoto(file);
+    state.newMealFile = result.file;
+    els.newMealPhotoInfo.textContent = `Siap diunggah: ${result.width}×${result.height} px · ${formatBytes(
+      result.file.size,
+    )}`;
+    state.newMealPreviewUrl = URL.createObjectURL(result.file);
+    els.newMealPreview.src = state.newMealPreviewUrl;
+    els.newMealPreview.hidden = false;
+  } catch (error) {
+    els.newMealPhoto.value = '';
+    showError(els.newMealError, error.message);
+    window.alert(`Foto tidak bisa dipakai: ${error.message}`);
+  } finally {
+    els.btnSaveNewMeal.disabled = false;
+  }
+});
+
 function openAddMeal() {
   els.formAddMeal.reset();
+  resetNewMealPhoto();
   els.newMealTime.value = currentWallTime();
   const type = defaultMealType(els.newMealTime.value);
   els.formAddMeal.querySelector(`input[name="newMealType"][value="${type}"]`).checked = true;
@@ -837,7 +965,7 @@ els.formAddMeal.addEventListener('submit', async (event) => {
   event.preventDefault();
   showError(els.newMealError, '');
 
-  const file = els.newMealPhoto.files?.[0];
+  const file = state.newMealFile ?? els.newMealPhoto.files?.[0];
   const mealType = els.formAddMeal.querySelector('input[name="newMealType"]:checked')?.value;
   const mealTime = els.newMealTime.value;
 
@@ -850,7 +978,9 @@ els.formAddMeal.addEventListener('submit', async (event) => {
     return;
   }
   if (file.size > MAX_PHOTO_BYTES) {
-    showError(els.newMealError, 'Ukuran foto maksimal 6 MB.');
+    const message = 'Foto masih lebih dari 6 MB setelah diperkecil. Coba ambil ulang foto.';
+    showError(els.newMealError, message);
+    window.alert(`Gagal mengunggah foto: ${message}`);
     return;
   }
   if (!mealType) {
@@ -873,12 +1003,19 @@ els.formAddMeal.addEventListener('submit', async (event) => {
     applyMealResponse(payload);
     await loadOverview();
     if (payload.meal?.aiStatus === 'failed') {
-      toast(payload.meal.aiError || 'Analisis AI gagal.', 'error');
+      const message = payload.meal.aiError || 'Analisis AI gagal.';
+      toast(message, 'error');
+      window.alert(`Foto terunggah, tetapi analisis gagal: ${message}`);
     } else {
       toast(`${MEAL_LABELS[mealType] ?? 'Makan'} pukul ${mealTime} ditambahkan.`);
     }
   } catch (error) {
-    showError(els.newMealError, error.message);
+    const message =
+      error instanceof TypeError
+        ? 'Tidak bisa menghubungi server. Periksa koneksi internet lalu coba lagi.'
+        : error.message || 'Upload gagal tanpa keterangan.';
+    showError(els.newMealError, message);
+    window.alert(`Gagal mengunggah foto: ${message}`);
   } finally {
     els.btnSaveNewMeal.disabled = false;
   }

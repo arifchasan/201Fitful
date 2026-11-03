@@ -202,7 +202,7 @@ function renderUsers() {
 
 async function boot() {
   try {
-    const response = await fetch('/api/dashboard');
+    const response = await fetch('/api/dashboard', { cache: 'no-store' });
     if (!response.ok) throw new Error('Gagal memuat data dashboard.');
     state.data = await response.json();
 

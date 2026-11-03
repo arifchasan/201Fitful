@@ -21,7 +21,17 @@ fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const app = express();
 app.use(express.json({ limit: '200kb' }));
-app.use(express.static(PUBLIC_DIR));
+app.use('/api', (_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
+app.use(
+  express.static(PUBLIC_DIR, {
+    setHeaders(res, filePath) {
+      res.setHeader('Cache-Control', filePath.endsWith('.html') ? 'no-store' : 'no-cache');
+    },
+  }),
+);
 app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '7d', index: false }));
 
 /* ---------------------------------------------------------------- helpers */
@@ -1267,10 +1277,12 @@ app.get('/api/dashboard/users/:userId', async (req, res) => {
 /* ------------------------------------------------------------------ errors */
 
 app.get('/dashboard', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
   res.sendFile(path.join(PUBLIC_DIR, 'dashboard.html'));
 });
 
 app.get('/dashboard/:userId', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
   res.sendFile(path.join(PUBLIC_DIR, 'detail.html'));
 });
 
@@ -1284,9 +1296,18 @@ app.use((req, res) => {
 
 app.use((error, _req, res, _next) => {
   if (error instanceof multer.MulterError) {
-    const message =
-      error.code === 'LIMIT_FILE_SIZE' ? 'Ukuran foto maksimal 6 MB.' : 'Gagal mengunggah foto.';
-    res.status(400).json({ error: message });
+    const messages = {
+      LIMIT_FILE_SIZE: 'Foto terlalu besar (maksimal 6 MB). Coba ambil ulang foto.',
+      LIMIT_FILE_COUNT: 'Hanya satu foto yang boleh diunggah.',
+      LIMIT_UNEXPECTED_FILE: 'Hanya satu foto yang boleh diunggah.',
+      LIMIT_PART_COUNT: 'Bagian unggahan terlalu banyak.',
+      LIMIT_FIELD_COUNT: 'Kolom unggahan terlalu banyak.',
+      LIMIT_FIELD_KEY: 'Nama kolom unggahan terlalu panjang.',
+      LIMIT_FIELD_VALUE: 'Nilai kolom unggahan terlalu besar.',
+    };
+    res.status(400).json({
+      error: messages[error.code] ?? `Gagal mengunggah foto (${error.code}).`,
+    });
     return;
   }
   if (error instanceof HttpError) {

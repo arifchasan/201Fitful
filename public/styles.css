@@ -2121,6 +2121,19 @@ input[readonly] {
   background: var(--surface-soft);
 }
 
+.meal-preview {
+  display: block;
+  width: 100%;
+  max-height: 190px;
+  margin-top: 8px;
+  border-radius: 10px;
+  object-fit: cover;
+}
+
+.meal-preview[hidden] {
+  display: none;
+}
+
 .segmented.segmented-4 {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
