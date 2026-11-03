@@ -6,13 +6,13 @@ Jurnal kebugaran harian: tulis deklarasi, catat aktivitas, dan unggah foto makan
 
 - **Identifikasi email** — email unik menjadi identitas. Memasukkan email yang sudah terdaftar akan memuat profil dan seluruh data sebelumnya (tanpa membuat pengguna baru); data yang diketik ulang tidak menimpa profil lama.
 - **Onboarding profil** — email, nama, **tanggal lahir (hari/bulan/tahun)**, gender, tinggi, berat, **body fat opsional**, **tingkat aktivitas harian**, **target berat badan (turun/jaga/naik)**, dan **zona waktu (UTC+6, UTC+7/WIB, UTC+8/WITA, UTC+9/WIT)**; usia, BMI, berat badan ideal, dan anjuran kalori dihitung otomatis.
-- **Anjuran harian** — **berat badan ideal (IBW = 22 × tinggi(m)²)**, **BMR Mifflin-St Jeor memakai IBW**, lalu **TDEE = BMR × faktor aktivitas** dan penyesuaian target berat (−500 kkal turun / 0 jaga / +300 kkal naik, tidak pernah di bawah BMR). **Protein minimal = 1 g × IBW**. Kartu anjuran menampilkan rincian BMR → TDEE → target, ditambah rentang **quick method (IBW × 20–25 kkal)** sebagai pembanding.
+- **Anjuran harian berupa rentang** — **berat badan ideal (IBW = 22 × tinggi(m)²)**, **BMR Mifflin-St Jeor memakai IBW**, lalu **TDEE = BMR × faktor aktivitas**. Kalori ditampilkan sebagai rentang sesuai target: **turun = TDEE −500…−300 kkal**, **jaga = TDEE −100…+100 kkal**, **naik = TDEE +200…+400 kkal** (tidak pernah di bawah BMR/1.200 kkal). Protein ditampilkan **1–1,5 g × IBW**. Kartu anjuran menampilkan rentang target aktif, rincian BMR → TDEE, **perbandingan ketiga target (turun/jaga/naik)**, ditambah rentang **quick method (IBW × 20–25 kkal)** sebagai pembanding.
 - **Deklarasi harian** — satu komitmen per hari.
 - **Aktivitas harian** — steps dan jenis olahraga.
-- **Catatan & timer puasa** — mencatat **tanggal + jam terakhir makan** dan (opsional) **tanggal + jam buka puasa**, bukan rencana ke depan. Begitu waktu makan terakhir disimpan tanpa buka puasa, timer berjalan real-time dari waktu tersebut; target **12/14/16/18 jam** bisa dipilih per hari, lengkap dengan sisa waktu, perkiraan jam buka, dan progres target. Timer dan tanggal "hari ini" memakai **zona waktu profil** (UTC+6 sampai UTC+9), bukan zona waktu server atau browser. Durasi puasa yang sudah selesai dihitung otomatis, termasuk rentang yang melewati tengah malam.
-- **Pola makan** — slot Sarapan, Siang, Malam. Setiap slot menerima satu foto; foto langsung dikirim ke **OpenAI vision** untuk estimasi kalori, protein, dan deskripsi singkat makanan.
+- **Timer puasa gaya Zero** — tombol **“Mulai berpuasa”** mencatat waktu mulai sekarang dan langsung menjalankan timer; tombol **“Puasa selesai”** menghentikannya dan menampilkan durasi + rekomendasi (target tercapai, sisa waktu ke target, atau saran 12–16 jam bila puasa terlalu singkat). Target **12/14/16/18 jam** bisa dipilih per hari, lengkap dengan sisa waktu dan perkiraan jam buka. Waktu mulai/buka juga masih bisa diatur manual lewat bagian “Atur waktu manual”. Timer dan tanggal "hari ini" memakai **zona waktu profil** (UTC+6 sampai UTC+9), bukan zona waktu server atau browser. Durasi puasa yang sudah selesai dihitung otomatis, termasuk rentang yang melewati tengah malam.
+- **Pola makan dinamis** — tidak dibatasi tiga slot. Tombol **“Tambah makan”** membuka formulir berisi **waktu makan**, jenis (**Sarapan / Siang / Malam / Camilan**), dan foto; setiap catatan disimpan sebagai baris baru dan diurutkan menurut jam, jadi camilan atau makan tambahan di waktu apa pun tidak menimpa catatan lain. Foto langsung dikirim ke **OpenAI vision** untuk estimasi kalori, protein, dan deskripsi singkat makanan.
 - **Edit hasil AI** — deskripsi, kalori, dan protein bisa disunting. Hasil asli AI tetap disimpan: tiap kartu punya tombol **AI / Suntingan** untuk membandingkan, dan suntingan bisa dikembalikan ke hasil AI kapan saja.
-- **Total harian** — total kalori dan protein (memakai suntingan bila ada) dari ketiga foto.
+- **Total harian** — total kalori dan protein (memakai suntingan bila ada) dari seluruh catatan makan hari itu.
 - **Progres harian 3 bagian** — hari dianggap lengkap bila **deklarasi terisi**, **aktivitas tercatat** (steps atau jenis olahraga terisi), dan **target protein tercapai**. Jumlah pola makan tidak lagi menentukan progres.
 - **Riwayat 7 hari & streak** — jumlah makan tercatat per hari dan hari beruntun yang lengkap (deklarasi + aktivitas + protein).
 - **Dashboard semua pengguna** di `/dashboard` — ringkasan harian, mingguan, dan bulanan untuk setiap pengguna: kalori vs batas, protein vs target, makan tercatat, langkah, durasi olahraga, puasa, hari lengkap, dan status target tercapai/ tidak.
@@ -76,7 +76,7 @@ Jurnal kebugaran harian: tulis deklarasi, catat aktivitas, dan unggah foto makan
 
 **daily_entries** — satu baris per pengguna per tanggal (unik `user_id + entry_date`): `declaration_text`, `steps`, `sport`, `last_meal_at`, `fast_break_at` (keduanya `DATETIME`, jadi tanggal ikut tersimpan), dan `fasting_target_hours` (default 16). Durasi puasa selesai tidak disimpan; dihitung dari dua catatan waktu tersebut setiap kali data dibaca, sedangkan puasa yang masih berjalan dihitung dari `last_meal_at` sampai sekarang. Database lama yang masih memakai kolom `last_meal_time`/`fast_break_time` (`TIME`) dimigrasikan otomatis saat server start: nilainya dipindahkan ke kolom baru dengan tanggal dari `entry_date`.
 
-**meals** — satu baris per pengguna, tanggal, dan jenis makan (unik `user_id + entry_date + meal_type`): `photo_path`, `food_name`, `calories`, `protein_g`, `ai_status` (`pending`/`done`/`failed`), `ai_error`, plus kolom suntingan `edited_food_name`, `edited_calories`, `edited_protein_g` yang dibiarkan `NULL` selama belum diedit. Kolom suntingan ditambahkan otomatis saat server start (migrasi tanpa menghapus data).
+**meals** — satu baris per catatan makan (tidak unik per jenis, jadi camilan dan makan tambahan bisa berapa pun): `entry_date`, `meal_type` (`breakfast`/`lunch`/`dinner`/`snack`), `meal_time` (`TIME`, jam makan), `photo_path`, `food_name`, `calories`, `protein_g`, `ai_status` (`pending`/`done`/`failed`), `ai_error`, plus kolom suntingan `edited_food_name`, `edited_calories`, `edited_protein_g` yang dibiarkan `NULL` selama belum diedit. Database lama dimigrasikan otomatis saat server start: enum `meal_type` ditambah `snack`, kolom `meal_time` ditambahkan, dan unique key per jenis makan dilepas tanpa menghapus data.
 
 Skema lengkap: [`server/schema.sql`](server/schema.sql).
 
@@ -94,9 +94,9 @@ Buka <http://localhost:3000/dashboard>. Halaman ini menampilkan:
 
 Menampilkan satu peserta secara utuh:
 
-- Profil: email, tanggal lahir, usia, gender, tinggi, berat, body fat, BMI, tanggal bergabung, streak, serta target protein minimal dan kalori maksimal dengan progres hari ini.
+- Profil: email, tanggal lahir, usia, gender, tinggi, berat, body fat, BMI, tanggal bergabung, streak, serta rentang protein dan kalori dengan progres hari ini.
 - Ringkasan tiga periode: hari ini, 7 hari, dan 30 hari (kalori, protein, makan, puasa, hari tercatat, hari lengkap).
-- Daftar catatan harian 30 hari terakhir (yang ada isinya, terbaru di atas): deklarasi, steps, olahraga, catatan puasa (tanggal & jam terakhir makan → buka puasa, target jam, atau durasi berjalan), progres `x/3` hari itu, total protein/kalori, serta tiga slot makan.
+- Daftar catatan harian 30 hari terakhir (yang ada isinya, terbaru di atas): deklarasi, steps, olahraga, catatan puasa (tanggal & jam terakhir makan → buka puasa, target jam, atau durasi berjalan), progres `x/3` hari itu, total protein/kalori, serta semua catatan makan hari itu lengkap dengan jamnya.
 - Setiap foto makan ditampilkan sebagai thumbnail yang bisa diketuk untuk membuka ukuran penuh; hasil AI dan suntingannya ditandai (`AI` / `Suntingan`) beserta nilai asli AI bila sudah disunting.
 
 Halaman ini **tidak memiliki autentikasi**: siapa pun yang membuka URL tersebut dapat melihat data semua pengguna. Batasi akses (misalnya di balik login admin) sebelum dipakai publik.
@@ -108,9 +108,10 @@ Halaman ini **tidak memiliki autentikasi**: siapa pun yang membuka URL tersebut 
 | POST   | `/api/users`                                      | Buat profil (butuh `birthDate` `YYYY-MM-DD`; `tzOffset` 6–9, default 7), atau muat profil lama bila `email` sudah ada (`existed: true`). Respons menyertakan `birthDate`, `age` hasil hitung, `tzOffset`/`tzLabel`, dan `recommendation` |
 | GET    | `/api/users/:userId`                              | Profil + BMI + zona waktu                         |
 | PATCH  | `/api/users/:userId`                              | Perbarui profil (termasuk `tzOffset`)             |
-| GET    | `/api/users/:userId/days/:date`                   | Entri, 3 slot makan, total, progres               |
+| GET    | `/api/users/:userId/days/:date`                   | Entri, daftar makan (urut jam), total, progres    |
 | PUT    | `/api/users/:userId/days/:date/entry`             | Simpan deklarasi + aktivitas + catatan puasa (`lastMealAt`/`fastBreakAt` `YYYY-MM-DDTHH:MM`; `lastMealAt` saja sudah memulai timer) + `fastingTargetHours` |
-| POST   | `/api/users/:userId/days/:date/meals`             | Upload foto makan (multipart `photo`, `mealType`) dan analisis AI |
+| POST   | `/api/users/:userId/days/:date/fasting`           | Timer gaya Zero: `action` = `start` / `end` / `target`, plus `fastingTargetHours` |
+| POST   | `/api/users/:userId/days/:date/meals`             | Tambah satu catatan makan (multipart `photo`, `mealType`, `mealTime` `HH:MM`) dan analisis AI |
 | PUT    | `/api/users/:userId/meals/:mealId`                | Simpan suntingan hasil AI (tanpa menimpa hasil AI) |
 | DELETE | `/api/users/:userId/meals/:mealId/edit`           | Kembalikan ke hasil AI (hapus suntingan)          |
 | POST   | `/api/users/:userId/meals/:mealId/analyze`        | Ulangi analisis AI untuk foto tersimpan           |
@@ -119,7 +120,7 @@ Halaman ini **tidak memiliki autentikasi**: siapa pun yang membuka URL tersebut 
 | GET    | `/api/dashboard`                                  | Ringkasan semua pengguna (harian, mingguan, bulanan) |
 | GET    | `/api/dashboard/users/:userId`                    | Detail satu peserta: profil, ringkasan, dan catatan 30 hari beserta foto |
 
-Upload dibatasi 6 MB dengan tipe JPG/PNG/WEBP. Jika analisis AI gagal (kuota, jaringan, atau key salah), foto tetap tersimpan dan respons berisi `aiStatus: "failed"` beserta pesan error singkat.
+`mealType` menerima `breakfast`, `lunch`, `dinner`, atau `snack`; `mealTime` opsional (default jam sekarang untuk hari ini). Upload dibatasi 6 MB dengan tipe JPG/PNG/WEBP. Jika analisis AI gagal (kuota, jaringan, atau key salah), foto tetap tersimpan dan respons berisi `aiStatus: "failed"` beserta pesan error singkat.
 
 ## Struktur folder
 

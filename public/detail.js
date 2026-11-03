@@ -10,7 +10,12 @@ const els = {
 const state = { data: null };
 
 const GENDER_LABEL = { male: 'Pria', female: 'Wanita' };
-const MEAL_LABEL = { breakfast: 'Sarapan', lunch: 'Siang', dinner: 'Malam' };
+const MEAL_LABEL = {
+  breakfast: 'Sarapan',
+  lunch: 'Makan siang',
+  dinner: 'Makan malam',
+  snack: 'Camilan',
+};
 
 function esc(value) {
   return String(value ?? '')
@@ -111,22 +116,24 @@ function profileHtml() {
         <div><dt>BMR</dt><dd>${fmt(user.recommendation.bmr)} kkal</dd></div>
         <div><dt>Aktivitas</dt><dd>${esc(user.recommendation.activityLabel ?? '—')}</dd></div>
         <div><dt>Target</dt><dd>${esc(user.recommendation.weightGoalLabel ?? '—')}</dd></div>
+        <div><dt>Kalori</dt><dd>${fmt(user.recommendation.calorieMin)}–${fmt(user.recommendation.calorieMax)} kkal</dd></div>
+        <div><dt>Protein</dt><dd>${fmt(user.recommendation.proteinMinG)}–${fmt(user.recommendation.proteinMaxG)} g</dd></div>
         <div><dt>Zona waktu</dt><dd>${esc(user.tzLabel ?? `UTC+${user.tzOffset}`)}</dd></div>
         <div><dt>Gabung</dt><dd>${esc(formatBirthDate((user.createdAt ?? '').slice(0, 10)) || '—')}</dd></div>
       </dl>
 
       <div class="detail-targets">
         <div class="u-bar-line">
-          <span>Protein minimal</span>
-          <strong>${fmt(user.recommendation.proteinMinG)} g</strong>
+          <span>Protein (1–1,5 g/kg BB ideal)</span>
+          <strong>${fmt(user.recommendation.proteinMinG)}–${fmt(user.recommendation.proteinMaxG)} g</strong>
         </div>
         <div class="u-bar"><span style="width:${percentOf(
           state.data.summary.daily.proteinG,
           user.recommendation.proteinMinG,
         )}%"></span></div>
         <div class="u-bar-line detail-target-second">
-          <span>Kalori maksimal</span>
-          <strong>${fmt(user.recommendation.calorieMax)} kkal</strong>
+          <span>Kalori</span>
+          <strong>${fmt(user.recommendation.calorieMin)}–${fmt(user.recommendation.calorieMax)} kkal</strong>
         </div>
         <div class="u-bar is-calorie"><span class="${state.data.summary.daily.calorieOver ? 'is-over' : ''}" style="width:${percentOf(
           state.data.summary.daily.calories,
@@ -134,9 +141,9 @@ function profileHtml() {
         )}%"></span></div>
         <p class="target-note">BMR ${fmt(user.recommendation.bmr)} kkal × ${user.recommendation.activityFactor} = ${fmt(
           user.recommendation.tdee,
-        )} kkal · quick method ${fmt(user.recommendation.quickCaloriesLow)}–${fmt(
-          user.recommendation.quickCaloriesHigh,
-        )} kkal · protein ${user.recommendation.proteinPerKgIbw ?? 1} g/kg BB ideal</p>
+        )} kkal · ${esc(user.recommendation.calorieBandLabel ?? '')} · quick method ${fmt(
+          user.recommendation.quickCaloriesLow,
+        )}–${fmt(user.recommendation.quickCaloriesHigh)} kkal · protein ${user.recommendation.proteinPerKgIbw ?? 1}–${user.recommendation.proteinMaxPerKgIbw ?? 1.5} g/kg BB ideal</p>
       </div>
     </section>`;
 }
@@ -162,7 +169,7 @@ function summaryHtml() {
       items: [
         sumItem(`${fmt(daily.calories)}`, `/ ${fmt(user.recommendation.calorieMax)} kkal`),
         sumItem(`${fmt(round1(daily.proteinG))}`, `/ ${fmt(user.recommendation.proteinMinG)} g protein`),
-        sumItem(`${daily.meals}`, '/ 3 makan'),
+        sumItem(`${daily.meals}`, 'makan'),
         sumItem(fastingText(fasting), 'puasa'),
       ],
     },
@@ -203,23 +210,8 @@ function summaryHtml() {
 
 /* -------------------------------------------------------------- day cards */
 
-function mealHtml(type, meal) {
-  if (!meal) {
-    return `
-      <figure class="d-meal is-empty">
-        <span class="d-meal-thumb is-empty" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-            <path d="M4 8a2 2 0 012-2h1.5l1.2-1.6A1 1 0 019.5 4h5a1 1 0 01.8.4L16.5 6H18a2 2 0 012 2v9a2 2 0 01-2 2H6a2 2 0 01-2-2V8z" stroke-linejoin="round" />
-            <circle cx="12" cy="12.5" r="3.4" />
-          </svg>
-        </span>
-        <figcaption class="d-meal-body">
-          <span class="d-meal-label">${MEAL_LABEL[type]}</span>
-          <p class="d-meal-food is-muted">Tidak diisi</p>
-        </figcaption>
-      </figure>`;
-  }
-
+function mealHtml(meal) {
+  const label = `${MEAL_LABEL[meal.type] ?? meal.type}${meal.time ? ` · ${meal.time}` : ''}`;
   const edited = Boolean(meal.edited);
   const statusLine = (() => {
     if (meal.aiStatus === 'failed') {
@@ -247,11 +239,11 @@ function mealHtml(type, meal) {
 
   return `
     <figure class="d-meal">
-      <a class="d-meal-thumb" href="${esc(meal.photoUrl)}" target="_blank" rel="noopener" aria-label="Lihat foto ${esc(MEAL_LABEL[meal.type])}">
-        <img src="${esc(meal.photoUrl)}" alt="Foto ${esc(MEAL_LABEL[meal.type])}" loading="lazy" />
+      <a class="d-meal-thumb" href="${esc(meal.photoUrl)}" target="_blank" rel="noopener" aria-label="Lihat foto ${esc(label)}">
+        <img src="${esc(meal.photoUrl)}" alt="Foto ${esc(label)}" loading="lazy" />
       </a>
       <figcaption class="d-meal-body">
-        <span class="d-meal-label">${MEAL_LABEL[meal.type]}
+        <span class="d-meal-label">${esc(label)}
           <em class="d-meal-tag ${edited ? 'is-edited' : ''}">${edited ? 'Suntingan' : 'AI'}</em>
         </span>
         ${statusLine}
@@ -280,9 +272,9 @@ function dayHtml(day) {
         ? `Target ${fastingTarget} jam`
         : '';
 
-  const meals = ['breakfast', 'lunch', 'dinner']
-    .map((type) => mealHtml(type, day.meals.find((meal) => meal.type === type)))
-    .join('');
+  const meals = day.meals.length
+    ? day.meals.map(mealHtml).join('')
+    : '<p class="u-empty">Belum ada catatan makan.</p>';
 
   return `
     <article class="day-card ${day.today ? 'is-today' : ''}">

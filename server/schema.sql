@@ -39,7 +39,8 @@ CREATE TABLE IF NOT EXISTS meals (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
   user_id INT UNSIGNED NOT NULL,
   entry_date DATE NOT NULL,
-  meal_type ENUM('breakfast', 'lunch', 'dinner') NOT NULL,
+  meal_type ENUM('breakfast', 'lunch', 'dinner', 'snack') NOT NULL,
+  meal_time TIME NULL,
   photo_path VARCHAR(255) NOT NULL,
   food_name VARCHAR(160) NULL,
   calories DECIMAL(7, 1) NULL,
@@ -52,7 +53,6 @@ CREATE TABLE IF NOT EXISTS meals (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
-  UNIQUE KEY uq_meals_user_date_type (user_id, entry_date, meal_type),
   KEY idx_meals_user_date (user_id, entry_date),
   CONSTRAINT fk_meals_user
     FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE

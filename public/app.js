@@ -39,6 +39,7 @@ const els = {
   recProteinBasis: $('#rec-protein-basis'),
   recCalorieBasis: $('#rec-calorie-basis'),
   recQuickMethod: $('#rec-quick-method'),
+  recGoals: $('#rec-goals'),
 
   dayStrip: $('#day-strip'),
   formDay: $('#form-day'),
@@ -47,6 +48,10 @@ const els = {
   inputSport: $('#input-sport'),
   inputLastMeal: $('#input-lastmeal'),
   inputFastBreak: $('#input-fastbreak'),
+  fastingActions: $('#fasting-actions'),
+  fastingResult: $('#fasting-result'),
+  btnFastStart: $('#btn-fast-start'),
+  btnFastEnd: $('#btn-fast-end'),
   fastingStatus: $('#fasting-status'),
   fastingClock: $('#fasting-clock'),
   fastingBar: $('#fasting-bar'),
@@ -57,6 +62,7 @@ const els = {
   btnSaveDay: $('#btn-save-day'),
 
   meals: $('#meals'),
+  btnAddMeal: $('#btn-add-meal'),
   mealCounter: $('#meal-counter'),
   totalCalories: $('#total-calories'),
   totalProtein: $('#total-protein'),
@@ -76,6 +82,13 @@ const els = {
   statBmi: $('#stat-bmi'),
   statBmiCategory: $('#stat-bmi-category'),
   historyList: $('#history-list'),
+
+  modalAddMeal: $('#modal-add-meal'),
+  formAddMeal: $('#form-add-meal'),
+  newMealTime: $('#new-meal-time'),
+  newMealPhoto: $('#new-meal-photo'),
+  newMealError: $('#new-meal-error'),
+  btnSaveNewMeal: $('#btn-save-new-meal'),
 
   modalEditMeal: $('#modal-edit-meal'),
   formEditMeal: $('#form-edit-meal'),
@@ -116,8 +129,12 @@ const ACTIVITY_LABEL = {
 const GOAL_LABEL = { lose: 'Turun', maintain: 'Jaga', gain: 'Naik' };
 const FASTING_TARGETS = [12, 14, 16, 18];
 const TZ_LABELS = { 6: 'UTC+6', 7: 'WIB (UTC+7)', 8: 'WITA (UTC+8)', 9: 'WIT (UTC+9)' };
-const MEAL_LABELS = { breakfast: 'Sarapan', lunch: 'Siang', dinner: 'Malam' };
-const MEAL_ORDER = ['breakfast', 'lunch', 'dinner'];
+const MEAL_LABELS = {
+  breakfast: 'Sarapan',
+  lunch: 'Makan siang',
+  dinner: 'Makan malam',
+  snack: 'Camilan',
+};
 const MAX_PHOTO_BYTES = 6 * 1024 * 1024;
 const DAY_TOTAL = 3;
 
@@ -135,10 +152,11 @@ const state = {
   selectedDate: todayISO(),
   day: null,
   history: [],
-  uploadingMeal: null,
+  busyMealId: null,
   mealView: {},
   editingMeal: null,
   fastingTarget: 16,
+  fastingBusy: false,
 };
 
 /* ------------------------------------------------------------------ utils */
@@ -234,10 +252,40 @@ function parseLocalDateTime(value) {
   return Number.isNaN(instant) ? null : new Date(instant);
 }
 
+/** Rekomendasi setelah puasa selesai (gaya Zero): durasi + saran target. */
+function fastingFeedback(minutes, targetHours) {
+  const targetMinutes = targetHours * 60;
+  if (minutes >= targetMinutes) {
+    return {
+      tone: 'good',
+      text: `Target ${targetHours} jam tercapai. Cukupi cairan saat berbuka dan pertahankan pola ini.`,
+    };
+  }
+  if (minutes >= 16 * 60) {
+    return {
+      tone: 'good',
+      text: `Sudah di atas 16 jam. ${durationText(targetMinutes - minutes)} lagi menuju target ${targetHours} jam.`,
+    };
+  }
+  if (minutes >= 12 * 60) {
+    return {
+      tone: 'mid',
+      text: `Sudah masuk rentang 12–16 jam. Tambah ${durationText(
+        targetMinutes - minutes,
+      )} lagi untuk mencapai target ${targetHours} jam.`,
+    };
+  }
+  return {
+    tone: 'low',
+    text: 'Puasa singkat. Untuk manfaat metabolik, coba target 12–16 jam pada puasa berikutnya.',
+  };
+}
+
 /** Timer puasa: berjalan real-time dari waktu makan terakhir sampai buka puasa. */
 function renderFasting() {
   const target = state.fastingTarget || 16;
   const targetMinutes = target * 60;
+  const isToday = state.selectedDate === todayISO();
 
   if (els.fastingTargets) {
     els.fastingTargets.querySelectorAll('[data-target]').forEach((button) => {
@@ -254,11 +302,22 @@ function renderFasting() {
     els.fastingBar.classList.toggle('is-done', done);
   };
 
+  els.fastingResult.hidden = true;
+  els.fastingResult.className = 'fasting-result';
+  els.fastingResult.innerHTML = '';
+  els.fastingActions.hidden = !isToday;
+  const running = Boolean(start) && !end;
+  els.btnFastEnd.hidden = !running;
+  els.btnFastStart.hidden = running;
+  els.btnFastStart.textContent = end ? 'Mulai puasa lagi' : 'Mulai berpuasa';
+  els.btnFastStart.disabled = state.fastingBusy;
+  els.btnFastEnd.disabled = state.fastingBusy;
+
   if (!start) {
     els.fastingStatus.textContent = 'Puasa belum dimulai';
     els.fastingClock.textContent = '00:00:00';
     setBar(0);
-    els.fastingSub.textContent = 'Isi waktu makan terakhir untuk memulai timer.';
+    els.fastingSub.textContent = 'Tekan “Mulai berpuasa” setelah selesai makan.';
     return;
   }
 
@@ -272,16 +331,22 @@ function renderFasting() {
       return;
     }
     const reached = minutes >= targetMinutes;
+    const feedback = fastingFeedback(minutes, target);
     els.fastingStatus.textContent = reached ? `Target ${target} jam tercapai` : 'Puasa selesai';
     els.fastingClock.textContent = durationText(minutes);
     setBar((minutes / targetMinutes) * 100, reached);
     els.fastingSub.textContent = `${formatDateTimeShort(els.inputLastMeal.value)} → ${formatDateTimeShort(
       els.inputFastBreak.value,
     )} · target ${target} jam`;
+    els.fastingResult.hidden = false;
+    els.fastingResult.className = `fasting-result is-${feedback.tone}`;
+    els.fastingResult.innerHTML = `<span>Puasa selesai</span><strong>${durationText(
+      minutes,
+    )}</strong><p>${esc(feedback.text)}</p>`;
     return;
   }
 
-  if (state.selectedDate !== todayISO()) {
+  if (!isToday) {
     els.fastingStatus.textContent = 'Buka puasa belum dicatat';
     els.fastingClock.textContent = '—';
     setBar(0);
@@ -492,34 +557,43 @@ function renderRecommendation() {
   const rec = state.user?.recommendation;
   if (!rec) return;
   const totals = state.day?.totals ?? { calories: 0, proteinG: 0 };
+  const n = (value) => Number(value).toLocaleString('id-ID');
 
-  els.recProteinTarget.textContent = `${rec.proteinMinG} g`;
-  els.recProteinNow.textContent = `${totals.proteinG} g`;
+  els.recProteinTarget.textContent = `${rec.proteinMinG}–${rec.proteinMaxG} g`;
+  els.recProteinNow.textContent = `${totals.proteinG} g · minimum ${rec.proteinMinG} g`;
   els.recProteinBar.style.width = `${Math.min(
     100,
     Math.round((totals.proteinG / rec.proteinMinG) * 100),
   )}%`;
 
   const caloriePercent = Math.round((totals.calories / rec.calorieMax) * 100);
-  els.recCalorieTarget.textContent = `${rec.calorieMax.toLocaleString('id-ID')} kkal`;
+  els.recCalorieTarget.textContent = `${n(rec.calorieMin)}–${n(rec.calorieMax)} kkal`;
   els.recCalorieNow.textContent = `${totals.calories.toLocaleString('id-ID')} kkal`;
   els.recCalorieBar.style.width = `${Math.min(100, caloriePercent)}%`;
   els.recCalorieBar.classList.toggle('is-over', caloriePercent > 100);
 
-  const n = (value) => Number(value).toLocaleString('id-ID');
-  els.recProteinBasis.textContent = `${rec.proteinPerKgIbw ?? 1} g × BB ideal ${n(rec.ibwKg)} kg`;
-  const adjust =
-    rec.calorieAdjustment === 0
-      ? 'tanpa penyesuaian'
-      : `${rec.calorieAdjustment > 0 ? '+' : '−'} ${n(Math.abs(rec.calorieAdjustment))} kkal (${
-          rec.weightGoalLabel ?? GOAL_LABEL[rec.weightGoal] ?? 'target'
-        })`;
+  els.recProteinBasis.textContent = `${
+    rec.proteinPerKgIbw ?? 1
+  }–${rec.proteinMaxPerKgIbw ?? 1.5} g × BB ideal ${n(rec.ibwKg)} kg`;
   els.recCalorieBasis.textContent = `BMR ${n(rec.bmr)} kkal × ${rec.activityFactor} (${
     rec.activityLabel
-  }) = ${n(rec.tdee)} kkal TDEE · ${adjust} → target ${n(rec.calorieMax)} kkal`;
+  }) = ${n(rec.tdee)} kkal TDEE · ${rec.calorieBandLabel ?? 'target'} → ${n(
+    rec.calorieMin,
+  )}–${n(rec.calorieMax)} kkal`;
   els.recQuickMethod.textContent = `Quick method (IBW × 20–25): ${n(
     rec.quickCaloriesLow,
   )}–${n(rec.quickCaloriesHigh)} kkal`;
+
+  els.recGoals.innerHTML = (rec.goals ?? [])
+    .map(
+      (goal) => `
+        <div class="rec-goal ${goal.key === rec.weightGoal ? 'is-active' : ''}">
+          <span>${esc(goal.label)}${goal.key === rec.weightGoal ? ' · aktif' : ''}</span>
+          <strong>${n(goal.calorieMin)}–${n(goal.calorieMax)} kkal</strong>
+          <em>Protein ${n(goal.proteinMinG)}–${n(goal.proteinMaxG)} g</em>
+        </div>`,
+    )
+    .join('');
 }
 
 function renderHeroProgress() {
@@ -540,19 +614,16 @@ function renderHeroProgress() {
 
 /* ----------------------------------------------------------------- meals */
 
-function mealSlotHtml(type, meal) {
-  const busy = state.uploadingMeal === type;
-  const hasPhoto = Boolean(meal);
-  const view = state.mealView[type] === 'before' ? 'before' : 'after';
+function mealCardHtml(meal) {
+  const view = state.mealView[meal.id] === 'before' ? 'before' : 'after';
   const shown =
-    meal && view === 'before'
+    view === 'before'
       ? meal.ai
-      : meal
-        ? { food: meal.food, calories: meal.calories, proteinG: meal.proteinG }
-        : null;
+      : { food: meal.food, calories: meal.calories, proteinG: meal.proteinG };
+  const busy = state.busyMealId === meal.id;
+  const label = MEAL_LABELS[meal.type] ?? meal.type;
 
   const status = (() => {
-    if (!meal) return '';
     if (meal.aiStatus === 'done') {
       return `<p class="meal-macros"><strong>${Math.round(shown.calories)}</strong> kkal · <strong>${shown.proteinG}</strong> g protein</p>`;
     }
@@ -563,128 +634,121 @@ function mealSlotHtml(type, meal) {
     return `<p class="meal-pending">Menganalisis…</p>`;
   })();
 
-  const viewSwitch = meal?.edited
+  const viewSwitch = meal.edited
     ? `<div class="view-switch" role="group" aria-label="Tampilan hasil">
          <button type="button" data-action="view" data-view="before" class="${view === 'before' ? 'is-active' : ''}" aria-pressed="${view === 'before'}">AI</button>
          <button type="button" data-action="view" data-view="after" class="${view === 'after' ? 'is-active' : ''}" aria-pressed="${view === 'after'}">Suntingan</button>
        </div>`
     : '';
 
-  const actions = hasPhoto
-    ? `<div class="meal-actions">
-         ${meal.aiStatus === 'done' ? '<button type="button" class="link-btn" data-action="edit">Edit</button>' : ''}
-         <button type="button" class="link-btn danger" data-action="remove">Hapus</button>
-       </div>`
-    : '';
-
   return `
-    <article class="meal ${hasPhoto ? 'has-photo' : ''} ${busy ? 'is-busy' : ''}" data-type="${type}">
+    <article class="meal has-photo ${busy ? 'is-busy' : ''}" data-meal-id="${meal.id}">
       <div class="meal-head">
-        <h3>${MEAL_LABELS[type]}</h3>
-        ${meal?.aiStatus === 'done' ? `<span class="meal-badge">${Math.round(shown.calories)} kkal</span>` : ''}
+        <h3>${label}${meal.time ? `<span class="meal-time">${esc(meal.time)}</span>` : ''}</h3>
+        ${meal.aiStatus === 'done' && shown.calories !== null ? `<span class="meal-badge">${Math.round(shown.calories)} kkal</span>` : ''}
       </div>
 
-      <label class="meal-photo" aria-label="Foto ${MEAL_LABELS[type]}">
-        <input type="file" accept="image/jpeg,image/png,image/webp" data-role="meal-input" hidden />
-        ${
-          hasPhoto
-            ? `<img src="${esc(meal.photoUrl)}" alt="Foto ${MEAL_LABELS[type]}" loading="lazy" />`
-            : `<span class="meal-empty">
-                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-                   <path d="M4 8a2 2 0 012-2h1.5l1.2-1.6A1 1 0 019.5 4h5a1 1 0 01.8.4L16.5 6H18a2 2 0 012 2v9a2 2 0 01-2 2H6a2 2 0 01-2-2V8z" stroke-linejoin="round" />
-                   <circle cx="12" cy="12.5" r="3.4" />
-                 </svg>
-                 <strong>Tambah foto</strong>
-               </span>`
-        }
+      <div class="meal-photo">
+        <a href="${esc(meal.photoUrl)}" target="_blank" rel="noopener" aria-label="Lihat foto ${label}">
+          <img src="${esc(meal.photoUrl)}" alt="Foto ${label}" loading="lazy" />
+        </a>
         ${busy ? '<span class="meal-loading"><span class="spinner"></span>Menganalisis…</span>' : ''}
-      </label>
+      </div>
 
       <div class="meal-info">
         ${shown?.food ? `<p class="meal-food">${esc(shown.food)}</p>` : ''}
         ${status}
         ${viewSwitch}
-        ${actions}
+        <div class="meal-actions">
+          ${meal.aiStatus === 'done' ? '<button type="button" class="link-btn" data-action="edit">Edit</button>' : ''}
+          <button type="button" class="link-btn danger" data-action="remove">Hapus</button>
+        </div>
       </div>
     </article>`;
 }
 
+function emptyMealsHtml() {
+  return `<div class="meals-empty">
+    <p>Belum ada catatan makan. Tambahkan sarapan, makan utama, atau camilan kapan saja.</p>
+    <button type="button" class="btn btn-primary btn-sm" data-action="add">+ Tambah makan</button>
+  </div>`;
+}
+
 function renderMeals() {
-  const meals = state.day?.meals ?? {};
-  els.meals.innerHTML = MEAL_ORDER.map((type) => mealSlotHtml(type, meals[type])).join('');
+  const meals = state.day?.meals ?? [];
+  els.meals.innerHTML = meals.length ? meals.map(mealCardHtml).join('') : emptyMealsHtml();
 
   const totals = state.day?.totals ?? { calories: 0, proteinG: 0, meals: 0 };
-  els.mealCounter.textContent = `${totals.meals}/3`;
+  els.mealCounter.textContent = `${totals.meals} makan`;
   els.totalCalories.textContent = `${totals.calories.toLocaleString('id-ID')} kkal`;
   els.totalProtein.textContent = `${totals.proteinG} g`;
 }
 
 function applyMealResponse(payload) {
-  if (payload.meal) state.day.meals[payload.meal.type] = payload.meal;
+  if (Array.isArray(payload.meals)) {
+    state.day.meals = payload.meals;
+  } else if (payload.meal) {
+    const list = state.day.meals ?? [];
+    const index = list.findIndex((item) => item.id === payload.meal.id);
+    if (index >= 0) list[index] = payload.meal;
+    else list.push(payload.meal);
+    list.sort(
+      (a, b) => (a.time ?? '99:99').localeCompare(b.time ?? '99:99') || a.id - b.id,
+    );
+    state.day.meals = list;
+  }
   state.day.totals = payload.totals ?? state.day.totals;
   state.day.progress = payload.progress ?? state.day.progress;
   renderMeals();
   renderHeroProgress();
 }
 
-async function uploadMeal(type, file) {
-  if (!file) return;
-  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-    toast('Format: JPG, PNG, atau WEBP.', 'error');
-    return;
-  }
-  if (file.size > MAX_PHOTO_BYTES) {
-    toast('Maksimal 6 MB.', 'error');
-    return;
-  }
+/** Jam dinding sekarang di zona pengguna, format "HH:MM". */
+function currentWallTime() {
+  const wall = new Date(Date.now() + userTzOffset * 3600000);
+  return `${String(wall.getUTCHours()).padStart(2, '0')}:${String(wall.getUTCMinutes()).padStart(2, '0')}`;
+}
 
-  state.uploadingMeal = type;
-  renderMeals();
+function defaultMealType(time) {
+  const hour = Number(String(time || currentWallTime()).slice(0, 2));
+  if (hour < 11) return 'breakfast';
+  if (hour < 15) return 'lunch';
+  if (hour < 20) return 'dinner';
+  return 'snack';
+}
 
-  const formData = new FormData();
-  formData.append('photo', file);
-  formData.append('mealType', type);
-
-  try {
-    const payload = await api(userPath(`/days/${state.selectedDate}/meals`), {
-      method: 'POST',
-      body: formData,
-    });
-    applyMealResponse(payload);
-    await loadOverview();
-    if (payload.meal?.aiStatus === 'failed') {
-      toast(payload.meal.aiError || 'Analisis AI gagal.', 'error');
-    } else {
-      toast(`${MEAL_LABELS[type]} dianalisis.`);
-    }
-  } catch (error) {
-    toast(error.message, 'error');
-  } finally {
-    state.uploadingMeal = null;
-    renderMeals();
-  }
+function openAddMeal() {
+  els.formAddMeal.reset();
+  els.newMealTime.value = currentWallTime();
+  const type = defaultMealType(els.newMealTime.value);
+  els.formAddMeal.querySelector(`input[name="newMealType"][value="${type}"]`).checked = true;
+  showError(els.newMealError, '');
+  openModal('modal-add-meal');
 }
 
 async function deleteMeal(meal) {
-  const ok = window.confirm(`Hapus foto ${MEAL_LABELS[meal.type].toLowerCase()}?`);
+  const label = MEAL_LABELS[meal.type]?.toLowerCase() ?? 'makan';
+  const ok = window.confirm(
+    `Hapus catatan ${label}${meal.time ? ` pukul ${meal.time}` : ''}?`,
+  );
   if (!ok) return;
   try {
     const payload = await api(userPath(`/meals/${meal.id}`), { method: 'DELETE' });
-    state.day.meals[meal.type] = null;
-    delete state.mealView[meal.type];
+    state.day.meals = (state.day.meals ?? []).filter((item) => item.id !== meal.id);
+    delete state.mealView[meal.id];
     state.day.totals = payload.totals;
     state.day.progress = payload.progress;
     renderMeals();
     renderHeroProgress();
     await loadOverview();
-    toast('Foto dihapus.');
+    toast('Catatan makan dihapus.');
   } catch (error) {
     toast(error.message, 'error');
   }
 }
 
 async function reanalyzeMeal(meal) {
-  state.uploadingMeal = meal.type;
+  state.busyMealId = meal.id;
   renderMeals();
   try {
     const payload = await api(userPath(`/meals/${meal.id}/analyze`), { method: 'POST' });
@@ -697,7 +761,7 @@ async function reanalyzeMeal(meal) {
   } catch (error) {
     toast(error.message, 'error');
   } finally {
-    state.uploadingMeal = null;
+    state.busyMealId = null;
     renderMeals();
   }
 }
@@ -767,25 +831,75 @@ els.formDay.addEventListener('submit', async (event) => {
   }
 });
 
-els.meals.addEventListener('change', (event) => {
-  const input = event.target.closest('[data-role="meal-input"]');
-  if (!input) return;
-  const card = input.closest('.meal');
-  const file = input.files?.[0];
-  input.value = '';
-  if (card && file) uploadMeal(card.dataset.type, file);
+els.btnAddMeal.addEventListener('click', openAddMeal);
+
+els.formAddMeal.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  showError(els.newMealError, '');
+
+  const file = els.newMealPhoto.files?.[0];
+  const mealType = els.formAddMeal.querySelector('input[name="newMealType"]:checked')?.value;
+  const mealTime = els.newMealTime.value;
+
+  if (!file) {
+    showError(els.newMealError, 'Pilih foto makan dulu.');
+    return;
+  }
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+    showError(els.newMealError, 'Format foto: JPG, PNG, atau WEBP.');
+    return;
+  }
+  if (file.size > MAX_PHOTO_BYTES) {
+    showError(els.newMealError, 'Ukuran foto maksimal 6 MB.');
+    return;
+  }
+  if (!mealType) {
+    showError(els.newMealError, 'Pilih jenis makan.');
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('photo', file);
+  formData.append('mealType', mealType);
+  formData.append('mealTime', mealTime);
+
+  els.btnSaveNewMeal.disabled = true;
+  try {
+    const payload = await api(userPath(`/days/${state.selectedDate}/meals`), {
+      method: 'POST',
+      body: formData,
+    });
+    closeModal('modal-add-meal');
+    applyMealResponse(payload);
+    await loadOverview();
+    if (payload.meal?.aiStatus === 'failed') {
+      toast(payload.meal.aiError || 'Analisis AI gagal.', 'error');
+    } else {
+      toast(`${MEAL_LABELS[mealType] ?? 'Makan'} pukul ${mealTime} ditambahkan.`);
+    }
+  } catch (error) {
+    showError(els.newMealError, error.message);
+  } finally {
+    els.btnSaveNewMeal.disabled = false;
+  }
 });
 
 els.meals.addEventListener('click', (event) => {
   const actionEl = event.target.closest('[data-action]');
   if (!actionEl) return;
-  const card = actionEl.closest('.meal');
-  const meal = state.day?.meals?.[card?.dataset.type];
-  if (!card || !meal) return;
 
   const action = actionEl.dataset.action;
+  if (action === 'add') {
+    openAddMeal();
+    return;
+  }
+
+  const card = actionEl.closest('[data-meal-id]');
+  const meal = (state.day?.meals ?? []).find((item) => item.id === Number(card?.dataset.mealId));
+  if (!card || !meal) return;
+
   if (action === 'view') {
-    state.mealView[meal.type] = actionEl.dataset.view;
+    state.mealView[meal.id] = actionEl.dataset.view;
     renderMeals();
     return;
   }
@@ -798,7 +912,9 @@ els.meals.addEventListener('click', (event) => {
 
 function openMealEdit(meal) {
   state.editingMeal = meal;
-  els.editMealSub.textContent = MEAL_LABELS[meal.type];
+  els.editMealSub.textContent = `${MEAL_LABELS[meal.type] ?? meal.type}${
+    meal.time ? ` · ${meal.time}` : ''
+  }`;
   els.aiFood.textContent = meal.ai?.food || '—';
   els.aiMacros.textContent =
     meal.ai?.calories === null || meal.ai?.calories === undefined
@@ -841,7 +957,7 @@ els.formEditMeal.addEventListener('submit', async (event) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    state.mealView[meal.type] = 'after';
+    state.mealView[meal.id] = 'after';
     applyMealResponse(result);
     await loadOverview();
     closeModal('modal-edit-meal');
@@ -859,7 +975,7 @@ els.btnResetMeal.addEventListener('click', async () => {
   els.btnResetMeal.disabled = true;
   try {
     const result = await api(userPath(`/meals/${meal.id}/edit`), { method: 'DELETE' });
-    state.mealView[meal.type] = 'after';
+    state.mealView[meal.id] = 'after';
     applyMealResponse(result);
     closeModal('modal-edit-meal');
     toast('Kembali ke hasil AI.');
@@ -884,7 +1000,7 @@ function renderHistory(history) {
   const rows = [...history].reverse();
   els.historyList.innerHTML = rows
     .map((day) => {
-      const percent = Math.round((day.meals / 3) * 100);
+      const percent = Math.min(100, Math.round((day.meals / 3) * 100));
       const isToday = day.date === todayISO();
       const label = isToday
         ? 'Hari ini'
@@ -896,7 +1012,7 @@ function renderHistory(history) {
           <span class="history-bar ${day.meals ? '' : 'is-empty'}">
             <span style="width:${percent}%"></span>
           </span>
-          <span class="history-count ${day.meals ? '' : 'is-muted'}">${day.meals ? `${day.meals}/3` : '—'}</span>
+          <span class="history-count ${day.meals ? '' : 'is-muted'}">${day.meals ? `${day.meals} makan` : '—'}</span>
         </li>`;
     })
     .join('');
@@ -1065,11 +1181,49 @@ function setupDateInputs() {
 els.inputLastMeal.addEventListener('input', renderFasting);
 els.inputFastBreak.addEventListener('input', renderFasting);
 
+async function saveFasting(action) {
+  if (state.fastingBusy) return;
+  state.fastingBusy = true;
+  renderFasting();
+  try {
+    const result = await api(userPath(`/days/${state.selectedDate}/fasting`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, fastingTargetHours: state.fastingTarget }),
+    });
+    state.day.entry = result.entry;
+    state.day.progress = result.progress ?? state.day.progress;
+    els.inputLastMeal.value = result.entry.lastMealAt ?? '';
+    els.inputFastBreak.value = result.entry.fastBreakAt ?? '';
+    state.fastingTarget = result.entry.fastingTargetHours ?? state.fastingTarget;
+    els.dayNote.textContent = `Tersimpan ${formatTime()}`;
+    renderHeroProgress();
+    await loadOverview();
+    if (action === 'start') toast('Puasa dimulai.');
+    else if (action === 'end') {
+      toast(`Puasa ${durationText(result.entry.fastingMinutes)} selesai.`);
+    } else {
+      toast(`Target ${state.fastingTarget} jam disimpan.`);
+    }
+  } catch (error) {
+    toast(error.message, 'error');
+  } finally {
+    state.fastingBusy = false;
+    renderFasting();
+  }
+}
+
+els.btnFastStart.addEventListener('click', () => saveFasting('start'));
+els.btnFastEnd.addEventListener('click', () => saveFasting('end'));
+
 els.fastingTargets.addEventListener('click', (event) => {
   const button = event.target.closest('[data-target]');
   if (!button) return;
-  state.fastingTarget = Number(button.dataset.target);
-  renderFasting();
+  const target = Number(button.dataset.target);
+  if (target === state.fastingTarget) return;
+  state.fastingTarget = target;
+  if (state.selectedDate === todayISO()) saveFasting('target');
+  else renderFasting();
 });
 
 // Timer berjalan terus selama halaman terbuka.

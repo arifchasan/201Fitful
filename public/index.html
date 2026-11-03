@@ -203,7 +203,7 @@
             <h2>Anjuran harian</h2>
             <div class="rec-item">
               <div class="rec-line">
-                <span>Protein minimal</span>
+                <span>Protein</span>
                 <strong id="rec-protein-target">—</strong>
               </div>
               <div class="rec-bar"><span id="rec-protein-bar" style="width: 0%"></span></div>
@@ -212,7 +212,7 @@
             </div>
             <div class="rec-item">
               <div class="rec-line">
-                <span>Kalori maksimal</span>
+                <span>Kalori</span>
                 <strong id="rec-calorie-target">—</strong>
               </div>
               <div class="rec-bar is-calorie"><span id="rec-calorie-bar" style="width: 0%"></span></div>
@@ -220,6 +220,7 @@
               <p class="rec-detail" id="rec-calorie-basis">—</p>
               <p class="rec-detail" id="rec-quick-method">—</p>
             </div>
+            <div class="rec-goals" id="rec-goals"></div>
           </section>
 
           <div class="layout">
@@ -250,30 +251,38 @@
                   </div>
                 </div>
 
-                <h2 class="section-title"><span aria-hidden="true">⏳</span> Catatan puasa</h2>
-                <div class="field-row">
-                  <div class="field">
-                    <label for="input-lastmeal">Terakhir makan</label>
-                    <input id="input-lastmeal" type="datetime-local" />
-                  </div>
-                  <div class="field">
-                    <label for="input-fastbreak">Buka puasa</label>
-                    <input id="input-fastbreak" type="datetime-local" />
-                  </div>
-                </div>
+                <h2 class="section-title"><span aria-hidden="true">⏳</span> Puasa</h2>
                 <div class="fasting-panel" id="fasting-panel">
                   <div class="fasting-top">
                     <span class="fasting-status" id="fasting-status">Puasa belum dimulai</span>
                     <strong class="fasting-clock" id="fasting-clock">00:00:00</strong>
                   </div>
                   <div class="fasting-track"><span id="fasting-bar" style="width: 0%"></span></div>
-                  <p class="fasting-sub" id="fasting-sub">Isi waktu makan terakhir untuk memulai timer.</p>
+                  <p class="fasting-sub" id="fasting-sub">Tekan “Mulai berpuasa” setelah selesai makan.</p>
+                  <div class="fasting-result" id="fasting-result" hidden></div>
+                  <div class="fasting-actions" id="fasting-actions">
+                    <button type="button" class="btn btn-primary" id="btn-fast-start">Mulai berpuasa</button>
+                    <button type="button" class="btn btn-ghost" id="btn-fast-end" hidden>Puasa selesai</button>
+                  </div>
                   <div class="fasting-targets" role="group" aria-label="Target puasa">
                     <button type="button" class="fasting-target" data-target="12" aria-pressed="false">12 jam</button>
                     <button type="button" class="fasting-target" data-target="14" aria-pressed="false">14 jam</button>
                     <button type="button" class="fasting-target" data-target="16" aria-pressed="false">16 jam</button>
                     <button type="button" class="fasting-target" data-target="18" aria-pressed="false">18 jam</button>
                   </div>
+                  <details class="fasting-manual">
+                    <summary>Atur waktu manual</summary>
+                    <div class="field-row">
+                      <div class="field">
+                        <label for="input-lastmeal">Terakhir makan</label>
+                        <input id="input-lastmeal" type="datetime-local" />
+                      </div>
+                      <div class="field">
+                        <label for="input-fastbreak">Buka puasa</label>
+                        <input id="input-fastbreak" type="datetime-local" />
+                      </div>
+                    </div>
+                  </details>
                 </div>
 
                 <p class="form-error" id="day-error" hidden></p>
@@ -287,7 +296,10 @@
               <section class="card meals-card">
                 <div class="card-head">
                   <h2><span aria-hidden="true">🥗</span> Pola makan</h2>
-                  <span class="counter" id="meal-counter">0/3</span>
+                  <div class="meal-head-actions">
+                    <span class="counter" id="meal-counter">0 makan</span>
+                    <button type="button" class="btn btn-primary btn-sm" id="btn-add-meal">+ Tambah makan</button>
+                  </div>
                 </div>
                 <div class="meals" id="meals"></div>
                 <div class="meal-totals">
@@ -341,6 +353,63 @@
         </div>
       </section>
     </main>
+
+    <!-- ============================ ADD MEAL MODAL ======================== -->
+    <div class="modal" id="modal-add-meal" hidden>
+      <div class="modal-backdrop" data-close="modal-add-meal"></div>
+      <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="add-meal-title">
+        <button type="button" class="modal-close" data-close="modal-add-meal" aria-label="Tutup">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 6l12 12M18 6L6 18" stroke-linecap="round" />
+          </svg>
+        </button>
+        <h2 id="add-meal-title">Tambah makan</h2>
+        <p class="modal-sub">Catat makan atau camilan kapan saja.</p>
+
+        <form id="form-add-meal" novalidate>
+          <div class="field-row">
+            <div class="field">
+              <label for="new-meal-time">Waktu</label>
+              <input id="new-meal-time" type="time" required />
+            </div>
+            <div class="field">
+              <label>Jenis</label>
+              <div class="segmented segmented-4" role="radiogroup" aria-label="Jenis makan">
+                <label class="segmented-option">
+                  <input type="radio" name="newMealType" value="breakfast" />
+                  <span>Sarapan</span>
+                </label>
+                <label class="segmented-option">
+                  <input type="radio" name="newMealType" value="lunch" />
+                  <span>Siang</span>
+                </label>
+                <label class="segmented-option">
+                  <input type="radio" name="newMealType" value="dinner" />
+                  <span>Malam</span>
+                </label>
+                <label class="segmented-option">
+                  <input type="radio" name="newMealType" value="snack" />
+                  <span>Camilan</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="new-meal-photo">Foto makan</label>
+            <input id="new-meal-photo" type="file" accept="image/jpeg,image/png,image/webp" required />
+            <p class="field-hint">JPG, PNG, atau WEBP maksimal 6 MB. AI akan mengisi kalori dan protein.</p>
+          </div>
+
+          <p class="form-error" id="new-meal-error" hidden></p>
+
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" data-close="modal-add-meal">Batal</button>
+            <button type="submit" class="btn btn-primary" id="btn-save-new-meal">Tambah &amp; analisis</button>
+          </div>
+        </form>
+      </div>
+    </div>
 
     <!-- ============================ EDIT MEAL MODAL ======================= -->
     <div class="modal" id="modal-edit-meal" hidden>

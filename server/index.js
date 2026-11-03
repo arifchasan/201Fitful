@@ -37,15 +37,36 @@ const ACTIVITY_LEVELS = {
   very_active: { factor: 1.9, label: 'Sangat aktif' },
 };
 const WEIGHT_GOALS = {
-  lose: { delta: -500, label: 'Turun berat' },
-  maintain: { delta: 0, label: 'Jaga berat' },
-  gain: { delta: 300, label: 'Naik berat' },
+  lose: {
+    delta: -500,
+    band: [-500, -300],
+    bandLabel: 'defisit 300–500 kkal',
+    label: 'Turun berat',
+  },
+  maintain: {
+    delta: 0,
+    band: [-100, 100],
+    bandLabel: 'sekitar kebutuhan',
+    label: 'Jaga berat',
+  },
+  gain: {
+    delta: 300,
+    band: [200, 400],
+    bandLabel: 'surplus 200–400 kkal',
+    label: 'Naik berat',
+  },
 };
 /** BMI tengah rentang normal, dipakai untuk berat badan ideal (quick method). */
 const IDEAL_BMI = 22;
-const PROTEIN_G_PER_KG_IBW = 1;
-const MEAL_TYPES = ['breakfast', 'lunch', 'dinner'];
-const MEAL_LABELS = { breakfast: 'sarapan', lunch: 'makan siang', dinner: 'makan malam' };
+const PROTEIN_RANGE = { min: 1, max: 1.5 };
+const MEAL_TYPES = ['breakfast', 'lunch', 'dinner', 'snack'];
+const MEAL_LABELS = {
+  breakfast: 'sarapan',
+  lunch: 'makan siang',
+  dinner: 'makan malam',
+  snack: 'camilan',
+};
+const MEAL_TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -201,12 +222,25 @@ function idealWeightKg(heightCm) {
   return Math.round(IDEAL_BMI * meters * meters * 10) / 10;
 }
 
+/** Pembulatan kebutuhan kalori ke 10 kkal terdekat. */
+function roundToTen(value) {
+  return Math.round(value / 10) * 10;
+}
+
+/** Rentang kalori untuk satu target, tidak pernah di bawah BMR/1.200 kkal. */
+function calorieBand(tdee, floor, [low, high]) {
+  const calorieMin = roundToTen(Math.max(tdee + low, floor));
+  const calorieMax = Math.max(calorieMin, roundToTen(Math.max(tdee + high, floor)));
+  return { calorieMin, calorieMax };
+}
+
 /**
- * Anjuran harian:
+ * Anjuran harian (rentang, bukan satu angka):
  * 1. IBW = 22 × tinggi(m)² (BMI tengah normal).
  * 2. BMR Mifflin-St Jeor memakai IBW, bukan berat aktual.
- * 3. TDEE = BMR × faktor aktivitas, lalu disesuaikan target berat badan.
- * 4. Protein = 1 g × IBW (quick method).
+ * 3. TDEE = BMR × faktor aktivitas.
+ * 4. Kalori: TDEE + rentang defisit/surplus sesuai target berat.
+ * 5. Protein: 1–1,5 g × IBW (1 g/kg adalah batas minimum quick method).
  */
 function recommendations({ heightCm, age, gender, activityLevel, weightGoal }) {
   const ibwKg = idealWeightKg(heightCm);
@@ -214,10 +248,27 @@ function recommendations({ heightCm, age, gender, activityLevel, weightGoal }) {
     10 * ibwKg + 6.25 * heightCm - 5 * age + (gender === 'male' ? 5 : -161),
   );
   const activity = ACTIVITY_LEVELS[activityLevel] ?? ACTIVITY_LEVELS.light;
-  const goal = WEIGHT_GOALS[weightGoal] ?? WEIGHT_GOALS.maintain;
+  const goalKey = WEIGHT_GOALS[weightGoal] ? weightGoal : 'maintain';
+  const goal = WEIGHT_GOALS[goalKey];
   const tdee = Math.round(bmr * activity.factor);
-  // Jangan turun di bawah BMR (maupun 1.200 kkal) walau targetnya defisit.
-  const calorieMax = Math.round(Math.max(tdee + goal.delta, bmr, 1200) / 10) * 10;
+  const floor = Math.max(bmr, 1200);
+  const current = calorieBand(tdee, floor, goal.band);
+
+  const proteinMinG = Math.round(ibwKg * PROTEIN_RANGE.min);
+  const proteinMaxG = Math.round(ibwKg * PROTEIN_RANGE.max);
+
+  const goals = Object.entries(WEIGHT_GOALS).map(([key, entry]) => {
+    const band = calorieBand(tdee, floor, entry.band);
+    return {
+      key,
+      label: entry.label,
+      bandLabel: entry.bandLabel,
+      calorieMin: band.calorieMin,
+      calorieMax: band.calorieMax,
+      proteinMinG,
+      proteinMaxG,
+    };
+  });
 
   return {
     ibwKg,
@@ -227,14 +278,19 @@ function recommendations({ heightCm, age, gender, activityLevel, weightGoal }) {
     activityLevel: ACTIVITY_LEVELS[activityLevel] ? activityLevel : 'light',
     activityFactor: activity.factor,
     activityLabel: activity.label,
-    weightGoal: WEIGHT_GOALS[weightGoal] ? weightGoal : 'maintain',
+    weightGoal: goalKey,
     weightGoalLabel: goal.label,
     calorieAdjustment: goal.delta,
-    calorieMax,
-    quickCaloriesLow: Math.round((ibwKg * 20) / 10) * 10,
-    quickCaloriesHigh: Math.round((ibwKg * 25) / 10) * 10,
-    proteinMinG: Math.round(ibwKg * PROTEIN_G_PER_KG_IBW),
-    proteinPerKgIbw: PROTEIN_G_PER_KG_IBW,
+    calorieBandLabel: goal.bandLabel,
+    calorieMin: current.calorieMin,
+    calorieMax: current.calorieMax,
+    quickCaloriesLow: roundToTen(ibwKg * 20),
+    quickCaloriesHigh: roundToTen(ibwKg * 25),
+    proteinMinG,
+    proteinMaxG,
+    proteinPerKgIbw: PROTEIN_RANGE.min,
+    proteinMaxPerKgIbw: PROTEIN_RANGE.max,
+    goals,
   };
 }
 
@@ -291,6 +347,7 @@ function shapeMeal(row) {
     id: row.id,
     type: row.meal_type,
     label: MEAL_LABELS[row.meal_type] ?? row.meal_type,
+    time: row.meal_time ? String(row.meal_time).slice(0, 5) : null,
     photoUrl: `/uploads/${row.photo_path}`,
     aiStatus: row.ai_status,
     aiError: row.ai_error,
@@ -524,6 +581,18 @@ function entryShape(row) {
   };
 }
 
+/** Dinding jam saat ini di zona pengguna, format "YYYY-MM-DD HH:MM:00". */
+function wallClockNow(tzOffset) {
+  const wall = new Date(Date.now() + tzOffset * 3600000).toISOString();
+  return `${wall.slice(0, 10)} ${wall.slice(11, 16)}:00`;
+}
+
+/** Jam dinding sekarang di zona pengguna, format "HH:MM". */
+function mealTimeNow(tzOffset) {
+  const wall = new Date(Date.now() + tzOffset * 3600000).toISOString();
+  return wall.slice(11, 16);
+}
+
 /** Menit puasa yang masih berjalan (belum ada waktu buka puasa). */
 function openFastingMinutes(entryData, tzOffset = DEFAULT_TZ_OFFSET) {
   if (!entryData?.lastMealAt || entryData.fastBreakAt) return null;
@@ -565,7 +634,8 @@ async function buildDay(userRow, date) {
     [user.id, date],
   );
   const [mealRows] = await pool.query(
-    'SELECT * FROM meals WHERE user_id = ? AND entry_date = ?',
+    `SELECT * FROM meals WHERE user_id = ? AND entry_date = ?
+      ORDER BY meal_time IS NULL, meal_time, id`,
     [user.id, date],
   );
 
@@ -574,10 +644,7 @@ async function buildDay(userRow, date) {
   if (date === today) {
     entryData.fastingElapsedMinutes = openFastingMinutes(entryData, user.tzOffset);
   }
-  const meals = { breakfast: null, lunch: null, dinner: null };
-  for (const row of mealRows) {
-    meals[row.meal_type] = shapeMeal(row);
-  }
+  const meals = mealRows.map(shapeMeal);
 
   const totals = {
     calories: Math.round(mealRows.reduce((sum, r) => sum + effectiveNutrition(r).calories, 0)),
@@ -695,44 +762,37 @@ async function analyzeAndStore(mealRow) {
 app.post('/api/users/:userId/days/:date/meals', upload.single('photo'), async (req, res) => {
   try {
     const user = await findUser(req.params.userId);
+    const tz = tzOffsetOf(user);
     const { date } = req.params;
     const mealType = String(req.body.mealType ?? '');
 
     if (!isValidDate(date)) throw new HttpError(400, 'Format tanggal harus YYYY-MM-DD.');
     if (!MEAL_TYPES.includes(mealType)) throw new HttpError(400, 'Jenis makan tidak valid.');
-    if (date > todayString(tzOffsetOf(user))) {
+    if (date > todayString(tz)) {
       throw new HttpError(400, 'Belum bisa mengisi tanggal yang akan datang.');
     }
     if (!req.file) throw new HttpError(400, 'Foto makan wajib diunggah.');
 
-    const [existing] = await pool.query(
-      'SELECT * FROM meals WHERE user_id = ? AND entry_date = ? AND meal_type = ?',
-      [user.id, date, mealType],
+    const mealTimeInput = String(req.body.mealTime ?? '').trim();
+    if (mealTimeInput && !MEAL_TIME_RE.test(mealTimeInput)) {
+      throw new HttpError(400, 'Waktu makan harus berformat HH:MM.');
+    }
+    // Catatan hari ini otomatis memakai jam sekarang bila waktunya tidak diisi.
+    const mealTime = mealTimeInput || (date === todayString(tz) ? mealTimeNow(tz) : null);
+
+    // Setiap makan adalah baris baru, jadi camilan dan makan tambahan tidak
+    // saling menimpa slot sarapan/siang/malam.
+    const [result] = await pool.query(
+      `INSERT INTO meals (user_id, entry_date, meal_type, meal_time, photo_path, ai_status)
+       VALUES (?, ?, ?, ?, ?, 'pending')`,
+      [user.id, date, mealType, mealTime, req.file.filename],
     );
 
-    await pool.query(
-      `INSERT INTO meals (user_id, entry_date, meal_type, photo_path, ai_status)
-       VALUES (?, ?, ?, ?, 'pending')
-       ON DUPLICATE KEY UPDATE
-         photo_path = VALUES(photo_path),
-         ai_status = 'pending',
-         ai_error = NULL,
-         food_name = NULL,
-         calories = NULL,
-         protein_g = NULL`,
-      [user.id, date, mealType, req.file.filename],
-    );
-
-    if (existing.length) await removePhoto(existing[0].photo_path);
-
-    const [rows] = await pool.query(
-      'SELECT * FROM meals WHERE user_id = ? AND entry_date = ? AND meal_type = ?',
-      [user.id, date, mealType],
-    );
+    const [rows] = await pool.query('SELECT * FROM meals WHERE id = ?', [result.insertId]);
     const meal = await analyzeAndStore(rows[0]);
     const day = await buildDay(user, date);
 
-    res.status(201).json({ meal, totals: day.totals, progress: day.progress });
+    res.status(201).json({ meal, meals: day.meals, totals: day.totals, progress: day.progress });
   } catch (error) {
     await removePhoto(req.file?.filename);
     throw error;
@@ -800,6 +860,74 @@ app.delete('/api/users/:userId/meals/:mealId', async (req, res) => {
 
   const day = await buildDay(user, mealRow.entry_date);
   res.json({ ok: true, totals: day.totals, progress: day.progress });
+});
+
+/* ----------------------------------------------------------------- fasting */
+
+app.post('/api/users/:userId/days/:date/fasting', async (req, res) => {
+  const user = await findUser(req.params.userId);
+  const tz = tzOffsetOf(user);
+  const { date } = req.params;
+  if (!isValidDate(date)) throw new HttpError(400, 'Format tanggal harus YYYY-MM-DD.');
+  if (date !== todayString(tz)) {
+    throw new HttpError(400, 'Timer puasa hanya bisa dipakai untuk hari ini.');
+  }
+
+  const action = String(req.body.action ?? '');
+  if (!['start', 'end', 'target'].includes(action)) {
+    throw new HttpError(400, 'Aksi puasa tidak dikenal.');
+  }
+
+  const [[entry]] = await pool.query(
+    'SELECT * FROM daily_entries WHERE user_id = ? AND entry_date = ?',
+    [user.id, date],
+  );
+
+  const targetInput = optionalInt(req.body.fastingTargetHours, 'Target puasa', 24);
+  const currentTarget = entry?.fasting_target_hours ? Number(entry.fasting_target_hours) : 16;
+  const target = targetInput ?? currentTarget;
+  if (target < 8) throw new HttpError(400, 'Target puasa minimal 8 jam.');
+
+  if (action === 'target') {
+    await pool.query(
+      `INSERT INTO daily_entries (user_id, entry_date, fasting_target_hours)
+       VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE fasting_target_hours = VALUES(fasting_target_hours)`,
+      [user.id, date, target],
+    );
+  } else if (action === 'start') {
+    // Zero-style: mulai puasa mencatat "makan terakhir" sekarang dan
+    // mengosongkan waktu buka puasa supaya timer langsung berjalan.
+    await pool.query(
+      `INSERT INTO daily_entries (user_id, entry_date, last_meal_at, fast_break_at, fasting_target_hours)
+       VALUES (?, ?, ?, NULL, ?)
+       ON DUPLICATE KEY UPDATE
+         last_meal_at = VALUES(last_meal_at),
+         fast_break_at = NULL,
+         fasting_target_hours = VALUES(fasting_target_hours)`,
+      [user.id, date, wallClockNow(tz), target],
+    );
+  } else {
+    if (!entry?.last_meal_at) {
+      throw new HttpError(400, 'Mulai puasa dulu sebelum menyelesaikannya.');
+    }
+    const startWall = wallClockMs(dateTimeInput(entry.last_meal_at));
+    const endWall = wallClockMs(wallClockNow(tz));
+    const minutes = endWall === null || startWall === null ? null : (endWall - startWall) / 60000;
+    if (minutes === null || minutes < 1) {
+      throw new HttpError(400, 'Puasa baru dimulai. Tunggu sebentar sebelum menyelesaikannya.');
+    }
+    if (minutes > 7 * 24 * 60) {
+      throw new HttpError(400, 'Rentang puasa maksimal 7 hari.');
+    }
+    await pool.query(
+      'UPDATE daily_entries SET fast_break_at = ?, fasting_target_hours = ? WHERE id = ?',
+      [wallClockNow(tz), target, entry.id],
+    );
+  }
+
+  const day = await buildDay(user, date);
+  res.json({ entry: day.entry, progress: day.progress, fasting: { targetHours: target } });
 });
 
 /* ---------------------------------------------------------------- overview */
@@ -943,7 +1071,9 @@ function summarizePeriod(user, entryMap, mealMap, startDate, periodDays) {
     avgCalories: trackedDays ? Math.round(calories / trackedDays) : 0,
     avgProteinG: trackedDays ? round1(proteinG / trackedDays) : 0,
     proteinTargetG: rec.proteinMinG,
+    proteinMaxTargetG: rec.proteinMaxG,
     calorieTarget: rec.calorieMax,
+    calorieMinTarget: rec.calorieMin,
   };
 }
 
@@ -1102,9 +1232,7 @@ app.get('/api/dashboard/users/:userId', async (req, res) => {
       today: date === today,
       tracked: entryHasContent(entryData) || dayMeals.length > 0,
       entry: entryData,
-      meals: MEAL_TYPES.map((type) => dayMeals.find((m) => m.meal_type === type))
-        .filter(Boolean)
-        .map(shapeMeal),
+      meals: dayMeals.map(shapeMeal),
       totals,
       progress: dayChecks(entryData, totals.proteinG, user.recommendation.proteinMinG),
     });

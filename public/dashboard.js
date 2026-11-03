@@ -86,7 +86,7 @@ function dailyBars(user) {
       <div>
         <div class="u-bar-line">
           <span>Kalori</span>
-          <strong>${fmt(daily.calories)} / ${fmt(daily.calorieTarget)} kkal</strong>
+          <strong>${fmt(daily.calories)} / ${fmt(daily.calorieMinTarget)}–${fmt(daily.calorieTarget)} kkal</strong>
         </div>
         <div class="u-bar is-calorie"><span style="width:${caloriePercent}%" class="${daily.calorieOver ? 'is-over' : ''}"></span></div>
       </div>
@@ -117,7 +117,7 @@ function dailyGrid(user) {
 
   return `
     <dl class="u-grid">
-      <div><dt>Makan</dt><dd>${daily.meals}/3</dd></div>
+      <div><dt>Makan</dt><dd>${daily.meals} makan</dd></div>
       <div><dt>Langkah</dt><dd>${daily.steps === null || daily.steps === undefined ? '—' : fmt(daily.steps)}</dd></div>
       <div><dt>Olahraga</dt><dd>${esc(sport)}</dd></div>
       <div><dt>Puasa</dt><dd title="${esc(fastingTitle)}">${fastingValue}</dd></div>

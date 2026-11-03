@@ -66,6 +66,33 @@ async function ensureIndex(table, indexName, definition) {
   }
 }
 
+/**
+ * Meals lama hanya punya satu slot per jenis makan. Sekarang setiap makan
+ * adalah baris baru (termasuk camilan), jadi enum ditambah "snack" dan unique
+ * key per jenis makan dilepas.
+ */
+async function migrateMealSlots() {
+  const [columns] = await pool.query(
+    `SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'meals' AND COLUMN_NAME = 'meal_type'`,
+    [DB_NAME],
+  );
+  if (columns.length && !String(columns[0].COLUMN_TYPE).includes("'snack'")) {
+    await pool.query(
+      "ALTER TABLE meals MODIFY meal_type ENUM('breakfast', 'lunch', 'dinner', 'snack') NOT NULL",
+    );
+  }
+
+  const [indexes] = await pool.query(
+    `SELECT INDEX_NAME FROM information_schema.STATISTICS
+      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'meals' AND INDEX_NAME = 'uq_meals_user_date_type'`,
+    [DB_NAME],
+  );
+  if (indexes.length) {
+    await pool.query('ALTER TABLE meals DROP INDEX uq_meals_user_date_type');
+  }
+}
+
 /** Pindahkan catatan jam puasa lama (TIME) ke catatan tanggal + jam (DATETIME). */
 async function migrateFastingRecords() {
   const columns = await columnNames('daily_entries');
@@ -101,7 +128,9 @@ export async function ensureSchema() {
     ['edited_food_name', 'VARCHAR(160) NULL'],
     ['edited_calories', 'DECIMAL(7, 1) NULL'],
     ['edited_protein_g', 'DECIMAL(6, 1) NULL'],
+    ['meal_time', 'TIME NULL'],
   ]);
+  await migrateMealSlots();
 
   await ensureColumns('daily_entries', [
     ['last_meal_at', 'DATETIME NULL'],
