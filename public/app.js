@@ -87,6 +87,9 @@ const els = {
   formAddMeal: $('#form-add-meal'),
   newMealTime: $('#new-meal-time'),
   newMealPhoto: $('#new-meal-photo'),
+  newMealGallery: $('#new-meal-gallery'),
+  btnPhotoCamera: $('#btn-photo-camera'),
+  btnPhotoGallery: $('#btn-photo-gallery'),
   newMealPhotoInfo: $('#new-meal-photo-info'),
   newMealPreview: $('#new-meal-preview'),
   newMealError: $('#new-meal-error'),
@@ -129,7 +132,7 @@ const ACTIVITY_LABEL = {
   very_active: 'Sangat aktif',
 };
 const GOAL_LABEL = { lose: 'Turun', maintain: 'Jaga', gain: 'Naik' };
-const FASTING_TARGETS = [12, 14, 16, 18];
+const FASTING_TARGETS = [12, 14, 16, 18, 20, 24, 72];
 const TZ_LABELS = { 6: 'UTC+6', 7: 'WIB (UTC+7)', 8: 'WITA (UTC+8)', 9: 'WIT (UTC+9)' };
 const MEAL_LABELS = {
   breakfast: 'Sarapan',
@@ -816,17 +819,20 @@ function resetNewMealPhoto() {
   els.newMealPreview.removeAttribute('src');
   els.newMealPhotoInfo.hidden = true;
   els.newMealPhotoInfo.textContent = '';
+  els.newMealPhoto.value = '';
+  els.newMealGallery.value = '';
 }
 
-els.newMealPhoto.addEventListener('change', async () => {
-  const file = els.newMealPhoto.files?.[0] ?? null;
+/** Foto dari kamera maupun galeri melewati kompresi yang sama. */
+async function useNewMealPhoto(input) {
+  const file = input.files?.[0] ?? null;
   resetNewMealPhoto();
   showError(els.newMealError, '');
   if (!file) return;
 
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
     const message = 'Format foto harus JPG, PNG, atau WEBP.';
-    els.newMealPhoto.value = '';
+    input.value = '';
     showError(els.newMealError, message);
     window.alert(`Foto tidak bisa dipakai: ${message}`);
     return;
@@ -845,13 +851,18 @@ els.newMealPhoto.addEventListener('change', async () => {
     els.newMealPreview.src = state.newMealPreviewUrl;
     els.newMealPreview.hidden = false;
   } catch (error) {
-    els.newMealPhoto.value = '';
+    input.value = '';
     showError(els.newMealError, error.message);
     window.alert(`Foto tidak bisa dipakai: ${error.message}`);
   } finally {
     els.btnSaveNewMeal.disabled = false;
   }
-});
+}
+
+els.newMealPhoto.addEventListener('change', () => useNewMealPhoto(els.newMealPhoto));
+els.newMealGallery.addEventListener('change', () => useNewMealPhoto(els.newMealGallery));
+els.btnPhotoCamera.addEventListener('click', () => els.newMealPhoto.click());
+els.btnPhotoGallery.addEventListener('click', () => els.newMealGallery.click());
 
 function openAddMeal() {
   els.formAddMeal.reset();
@@ -974,7 +985,8 @@ els.formAddMeal.addEventListener('submit', async (event) => {
   event.preventDefault();
   showError(els.newMealError, '');
 
-  const file = state.newMealFile ?? els.newMealPhoto.files?.[0];
+  const file =
+    state.newMealFile ?? els.newMealPhoto.files?.[0] ?? els.newMealGallery.files?.[0];
   const mealType = els.formAddMeal.querySelector('input[name="newMealType"]:checked')?.value;
   const mealTime = els.newMealTime.value;
 

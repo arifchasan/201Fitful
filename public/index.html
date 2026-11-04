@@ -6,7 +6,7 @@
     <title>201Fitful</title>
     <meta name="description" content="Deklarasi, aktivitas, dan kalori harian." />
     <meta name="theme-color" content="#0f9d6e" />
-    <link rel="stylesheet" href="/styles.css?v=20261103d" />
+    <link rel="stylesheet" href="/styles.css?v=20261104a" />
     <link
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='24' fill='%230f9d6e'/%3E%3Cpath d='M28 52l14 14 30-30' stroke='white' stroke-width='10' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
@@ -269,6 +269,9 @@
                     <button type="button" class="fasting-target" data-target="14" aria-pressed="false">14 jam</button>
                     <button type="button" class="fasting-target" data-target="16" aria-pressed="false">16 jam</button>
                     <button type="button" class="fasting-target" data-target="18" aria-pressed="false">18 jam</button>
+                    <button type="button" class="fasting-target" data-target="20" aria-pressed="false">20 jam</button>
+                    <button type="button" class="fasting-target" data-target="24" aria-pressed="false">24 jam</button>
+                    <button type="button" class="fasting-target" data-target="72" aria-pressed="false">72 jam</button>
                   </div>
                   <details class="fasting-manual">
                     <summary>Atur waktu manual</summary>
@@ -397,8 +400,13 @@
 
           <div class="field">
             <label for="new-meal-photo">Foto makan</label>
-            <input id="new-meal-photo" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" required />
-            <p class="field-hint">JPG, PNG, atau WEBP. Foto otomatis diperkecil (maks 1280 px, ±0,9 MB) sebelum diunggah. AI akan mengisi kalori dan protein.</p>
+            <div class="photo-source-actions">
+              <button type="button" class="btn btn-ghost btn-sm" id="btn-photo-camera">Ambil foto</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="btn-photo-gallery">Pilih dari galeri</button>
+            </div>
+            <input id="new-meal-photo" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" hidden />
+            <input id="new-meal-gallery" type="file" accept="image/jpeg,image/png,image/webp" hidden />
+            <p class="field-hint">JPG, PNG, atau WEBP — ambil lewat kamera atau pilih dari galeri. Foto otomatis diperkecil (maks 1280 px, ±0,9 MB) sebelum diunggah. AI akan mengisi kalori dan protein.</p>
             <p class="field-hint" id="new-meal-photo-info" hidden></p>
             <img class="meal-preview" id="new-meal-preview" alt="Pratinjau foto makan" hidden />
           </div>
@@ -581,6 +589,6 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
-    <script src="/app.js?v=20261103d" type="module"></script>
+    <script src="/app.js?v=20261104a" type="module"></script>
   </body>
 </html>

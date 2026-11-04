@@ -762,7 +762,7 @@ app.put('/api/users/:userId/days/:date/entry', async (req, res) => {
   const sport = optionalText(req.body.sport, 120);
   const lastMealAt = parseDateTime(req.body.lastMealAt, 'Tanggal & waktu makan terakhir');
   const fastBreakAt = parseDateTime(req.body.fastBreakAt, 'Tanggal & waktu buka puasa');
-  const fastingTargetHours = optionalInt(req.body.fastingTargetHours, 'Target puasa', 24) ?? 16;
+  const fastingTargetHours = optionalInt(req.body.fastingTargetHours, 'Target puasa', 72) ?? 16;
   if (fastingTargetHours < 8) {
     throw new HttpError(400, 'Target puasa minimal 8 jam.');
   }
@@ -959,7 +959,7 @@ app.post('/api/users/:userId/days/:date/fasting', async (req, res) => {
     [user.id, date],
   );
 
-  const targetInput = optionalInt(req.body.fastingTargetHours, 'Target puasa', 24);
+  const targetInput = optionalInt(req.body.fastingTargetHours, 'Target puasa', 72);
   const currentTarget = entry?.fasting_target_hours ? Number(entry.fasting_target_hours) : 16;
   const target = targetInput ?? currentTarget;
   if (target < 8) throw new HttpError(400, 'Target puasa minimal 8 jam.');

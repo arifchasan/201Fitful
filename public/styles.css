@@ -2121,6 +2121,16 @@ input[readonly] {
   background: var(--surface-soft);
 }
 
+.photo-source-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.photo-source-actions .btn {
+  flex: 1;
+}
+
 .meal-preview {
   display: block;
   width: 100%;
