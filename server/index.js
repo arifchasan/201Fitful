@@ -611,6 +611,67 @@ function openFastingMinutes(entryData, tzOffset = DEFAULT_TZ_OFFSET) {
   return Math.max(0, Math.round((Date.now() + tzOffset * 3600000 - start) / 60000));
 }
 
+/**
+ * Sesi puasa yang relevan untuk sebuah hari: milik hari itu sendiri, puasa yang
+ * dimulai hari sebelumnya dan masih berjalan, atau puasa yang baru dibuka hari ini.
+ */
+async function fastingSessionFor(user, entry, date, today, tzOffset) {
+  const ownStart = entry?.last_meal_at ? dateTimeInput(entry.last_meal_at) : null;
+  const ownBreak = entry?.fast_break_at ? dateTimeInput(entry.fast_break_at) : null;
+  const ownTarget = entry?.fasting_target_hours ? Number(entry.fasting_target_hours) : null;
+
+  if (ownStart) {
+    return {
+      startAt: ownStart,
+      breakAt: ownBreak,
+      targetHours: ownTarget ?? 16,
+      startDate: date,
+      running: !ownBreak,
+      inherited: false,
+    };
+  }
+  if (date !== today) return null;
+
+  // Puasa lintas tengah malam: dimulai kemarin, belum dibuka.
+  const [openRows] = await pool.query(
+    `SELECT * FROM daily_entries
+      WHERE user_id = ? AND last_meal_at IS NOT NULL AND fast_break_at IS NULL
+      ORDER BY last_meal_at DESC LIMIT 1`,
+    [user.id],
+  );
+  const openRow = openRows[0];
+  if (openRow) {
+    const startAt = dateTimeInput(openRow.last_meal_at);
+    return {
+      startAt,
+      breakAt: null,
+      targetHours: openRow.fasting_target_hours ? Number(openRow.fasting_target_hours) : 16,
+      startDate: startAt.slice(0, 10),
+      running: true,
+      inherited: startAt.slice(0, 10) !== date,
+    };
+  }
+
+  // Puasa kemarin yang baru dibuka hari ini tetap ditampilkan hasilnya.
+  const [doneRows] = await pool.query(
+    `SELECT * FROM daily_entries
+      WHERE user_id = ? AND fast_break_at IS NOT NULL AND DATE(fast_break_at) = ?
+      ORDER BY fast_break_at DESC LIMIT 1`,
+    [user.id, date],
+  );
+  const doneRow = doneRows[0];
+  if (!doneRow) return null;
+  const startAt = dateTimeInput(doneRow.last_meal_at);
+  return {
+    startAt,
+    breakAt: dateTimeInput(doneRow.fast_break_at),
+    targetHours: doneRow.fasting_target_hours ? Number(doneRow.fasting_target_hours) : 16,
+    startDate: startAt.slice(0, 10),
+    running: false,
+    inherited: startAt.slice(0, 10) !== date,
+  };
+}
+
 /** Entri dianggap berisi bila salah satu bagiannya diisi, termasuk catatan puasa. */
 function entryHasContent(entryData) {
   return (
@@ -652,7 +713,12 @@ async function buildDay(userRow, date) {
   const today = todayString(user.tzOffset);
   const entryData = entryShape(entry);
   if (date === today) {
-    entryData.fastingElapsedMinutes = openFastingMinutes(entryData, user.tzOffset);
+    const session = await fastingSessionFor(user, entry, date, today, user.tzOffset);
+    entryData.fastingSession = session;
+    entryData.fastingElapsedMinutes = session?.running
+      ? openFastingMinutes({ lastMealAt: session.startAt, fastBreakAt: null }, user.tzOffset)
+      : null;
+    if (session) entryData.fastingTargetHours = session.targetHours;
   }
   const meals = mealRows.map(shapeMeal);
 
@@ -898,31 +964,62 @@ app.post('/api/users/:userId/days/:date/fasting', async (req, res) => {
   const target = targetInput ?? currentTarget;
   if (target < 8) throw new HttpError(400, 'Target puasa minimal 8 jam.');
 
+  // Puasa yang masih terbuka bisa berasal dari hari sebelumnya (lintas tengah malam).
+  const [openRows] = await pool.query(
+    `SELECT * FROM daily_entries
+      WHERE user_id = ? AND last_meal_at IS NOT NULL AND fast_break_at IS NULL
+      ORDER BY last_meal_at DESC LIMIT 1`,
+    [user.id],
+  );
+  const openFast = openRows[0] ?? null;
+  let carriedOver = false;
+  let alreadyRunning = false;
+
   if (action === 'target') {
-    await pool.query(
-      `INSERT INTO daily_entries (user_id, entry_date, fasting_target_hours)
-       VALUES (?, ?, ?)
-       ON DUPLICATE KEY UPDATE fasting_target_hours = VALUES(fasting_target_hours)`,
-      [user.id, date, target],
-    );
+    if (openFast) {
+      await pool.query('UPDATE daily_entries SET fasting_target_hours = ? WHERE id = ?', [
+        target,
+        openFast.id,
+      ]);
+    } else {
+      await pool.query(
+        `INSERT INTO daily_entries (user_id, entry_date, fasting_target_hours)
+         VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE fasting_target_hours = VALUES(fasting_target_hours)`,
+        [user.id, date, target],
+      );
+    }
   } else if (action === 'start') {
-    // Zero-style: mulai puasa mencatat "makan terakhir" sekarang dan
-    // mengosongkan waktu buka puasa supaya timer langsung berjalan.
-    await pool.query(
-      `INSERT INTO daily_entries (user_id, entry_date, last_meal_at, fast_break_at, fasting_target_hours)
-       VALUES (?, ?, ?, NULL, ?)
-       ON DUPLICATE KEY UPDATE
-         last_meal_at = VALUES(last_meal_at),
-         fast_break_at = NULL,
-         fasting_target_hours = VALUES(fasting_target_hours)`,
-      [user.id, date, wallClockNow(tz), target],
-    );
+    // Hari berganti bukan alasan mereset timer: puasa yang masih berjalan dilanjutkan.
+    if (openFast) {
+      carriedOver = String(openFast.entry_date).slice(0, 10) !== date;
+      alreadyRunning = !carriedOver;
+      if (targetInput !== null) {
+        await pool.query('UPDATE daily_entries SET fasting_target_hours = ? WHERE id = ?', [
+          target,
+          openFast.id,
+        ]);
+      }
+    } else {
+      // Zero-style: mulai puasa mencatat "makan terakhir" sekarang dan
+      // mengosongkan waktu buka puasa supaya timer langsung berjalan.
+      await pool.query(
+        `INSERT INTO daily_entries (user_id, entry_date, last_meal_at, fast_break_at, fasting_target_hours)
+         VALUES (?, ?, ?, NULL, ?)
+         ON DUPLICATE KEY UPDATE
+           last_meal_at = VALUES(last_meal_at),
+           fast_break_at = NULL,
+           fasting_target_hours = VALUES(fasting_target_hours)`,
+        [user.id, date, wallClockNow(tz), target],
+      );
+    }
   } else {
-    if (!entry?.last_meal_at) {
+    if (!openFast) {
       throw new HttpError(400, 'Mulai puasa dulu sebelum menyelesaikannya.');
     }
-    const startWall = wallClockMs(dateTimeInput(entry.last_meal_at));
-    const endWall = wallClockMs(wallClockNow(tz));
+    const startWall = wallClockMs(dateTimeInput(openFast.last_meal_at));
+    const finishedAt = wallClockNow(tz);
+    const endWall = wallClockMs(finishedAt);
     const minutes = endWall === null || startWall === null ? null : (endWall - startWall) / 60000;
     if (minutes === null || minutes < 1) {
       throw new HttpError(400, 'Puasa baru dimulai. Tunggu sebentar sebelum menyelesaikannya.');
@@ -932,12 +1029,21 @@ app.post('/api/users/:userId/days/:date/fasting', async (req, res) => {
     }
     await pool.query(
       'UPDATE daily_entries SET fast_break_at = ?, fasting_target_hours = ? WHERE id = ?',
-      [wallClockNow(tz), target, entry.id],
+      [finishedAt, target, openFast.id],
     );
   }
 
   const day = await buildDay(user, date);
-  res.json({ entry: day.entry, progress: day.progress, fasting: { targetHours: target } });
+  res.json({
+    entry: day.entry,
+    progress: day.progress,
+    fasting: {
+      targetHours: day.entry.fastingSession?.targetHours ?? target,
+      running: Boolean(day.entry.fastingSession?.running),
+      carriedOver,
+      alreadyRunning,
+    },
+  });
 });
 
 /* ---------------------------------------------------------------- overview */

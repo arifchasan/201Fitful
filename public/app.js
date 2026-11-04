@@ -300,8 +300,12 @@ function renderFasting() {
     });
   }
 
-  const start = parseLocalDateTime(els.inputLastMeal.value);
-  const end = parseLocalDateTime(els.inputFastBreak.value);
+  // Sesi puasa bisa berasal dari hari sebelumnya (lintas tengah malam).
+  const session = state.day?.entry?.fastingSession ?? null;
+  const start = parseLocalDateTime(session?.startAt ?? els.inputLastMeal.value);
+  const end = session
+    ? parseLocalDateTime(session.breakAt) || null
+    : parseLocalDateTime(els.inputFastBreak.value);
   const setBar = (percent, done = false) => {
     els.fastingBar.style.width = `${Math.min(100, Math.max(0, percent))}%`;
     els.fastingBar.classList.toggle('is-done', done);
@@ -340,9 +344,11 @@ function renderFasting() {
     els.fastingStatus.textContent = reached ? `Target ${target} jam tercapai` : 'Puasa selesai';
     els.fastingClock.textContent = durationText(minutes);
     setBar((minutes / targetMinutes) * 100, reached);
-    els.fastingSub.textContent = `${formatDateTimeShort(els.inputLastMeal.value)} → ${formatDateTimeShort(
-      els.inputFastBreak.value,
-    )} · target ${target} jam`;
+    els.fastingSub.textContent = `${formatDateTimeShort(
+      session?.startAt ?? els.inputLastMeal.value,
+    )} → ${formatDateTimeShort(session?.breakAt ?? els.inputFastBreak.value)} · target ${
+      target
+    } jam${session?.inherited ? ' · lanjut dari kemarin' : ''}`;
     els.fastingResult.hidden = false;
     els.fastingResult.className = `fasting-result is-${feedback.tone}`;
     els.fastingResult.innerHTML = `<span>Puasa selesai</span><strong>${durationText(
@@ -372,8 +378,11 @@ function renderFasting() {
   const remaining = targetMinutes - elapsedMinutes;
   const breakAt = new Date(start.getTime() + targetMinutes * 60000);
   els.fastingClock.textContent = clockText(elapsedMs);
+  const carried = session?.inherited ? ' · lanjut dari kemarin' : '';
   els.fastingStatus.textContent =
-    remaining <= 0 ? `Target ${target} jam tercapai` : `Puasa berjalan · target ${target} jam`;
+    remaining <= 0
+      ? `Target ${target} jam tercapai${carried}`
+      : `Puasa berjalan · target ${target} jam${carried}`;
   setBar((elapsedMinutes / targetMinutes) * 100, remaining <= 0);
   els.fastingSub.textContent =
     remaining <= 0
@@ -1336,9 +1345,23 @@ async function saveFasting(action) {
     els.dayNote.textContent = `Tersimpan ${formatTime()}`;
     renderHeroProgress();
     await loadOverview();
-    if (action === 'start') toast('Puasa dimulai.');
-    else if (action === 'end') {
-      toast(`Puasa ${durationText(result.entry.fastingMinutes)} selesai.`);
+    if (action === 'start') {
+      toast(
+        result.fasting?.carriedOver
+          ? 'Puasa masih berjalan sejak kemarin.'
+          : result.fasting?.alreadyRunning
+            ? 'Puasa sudah berjalan.'
+            : 'Puasa dimulai.',
+      );
+    } else if (action === 'end') {
+      const session = result.entry?.fastingSession;
+      const startedAt = parseLocalDateTime(session?.startAt);
+      const brokeAt = parseLocalDateTime(session?.breakAt);
+      const minutes =
+        startedAt && brokeAt
+          ? Math.round((brokeAt.getTime() - startedAt.getTime()) / 60000)
+          : result.entry.fastingMinutes;
+      toast(Number.isFinite(minutes) ? `Puasa ${durationText(minutes)} selesai.` : 'Puasa selesai.');
     } else {
       toast(`Target ${state.fastingTarget} jam disimpan.`);
     }
@@ -1363,8 +1386,21 @@ els.fastingTargets.addEventListener('click', (event) => {
   else renderFasting();
 });
 
-// Timer berjalan terus selama halaman terbuka.
-setInterval(renderFasting, 1000);
+// Timer berjalan terus dan tanggal otomatis maju saat lewat tengah malam,
+// sehingga puasa yang sedang berjalan tetap terlihat beserta tombol berhentinya.
+let lastToday = todayISO();
+setInterval(() => {
+  const today = todayISO();
+  if (today !== lastToday) {
+    lastToday = today;
+    els.todayLabel.textContent = formatLongDate(today);
+    if (state.selectedDate === addDays(today, -1)) {
+      state.selectedDate = today;
+      loadDay(today).catch((error) => toast(error.message, 'error'));
+    }
+  }
+  renderFasting();
+}, 1000);
 
 /* --------------------------------------------------------------- modals */
 
